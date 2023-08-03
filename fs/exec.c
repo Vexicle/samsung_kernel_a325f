@@ -78,10 +78,6 @@
 
 #include <mt-plat/mtk_pidmap.h>
 
-#ifdef CONFIG_SECURITY_DEFEX
-#include <linux/defex.h>
-#endif
-
 #ifdef CONFIG_KDP_CRED
 #define rkp_is_nonroot(x) ((x->cred->type)>>1 & 1)
 #ifdef CONFIG_LOD_SEC
@@ -1936,15 +1932,6 @@ static int do_execveat_common(int fd, struct filename *filename,
 	if (IS_ERR(file))
 		goto out_unmark;
 
-#ifdef CONFIG_SECURITY_DEFEX
-	retval = task_defex_enforce(current, file, -__NR_execve);
-	if (retval < 0) {
-		bprm->file = file;
-		retval = -EPERM;
-		goto out_unmark;
-	 }
-#endif
-
 	sched_exec();
 
 	bprm->file = file;
@@ -2056,7 +2043,6 @@ int do_execveat(int fd, struct filename *filename,
 	struct user_arg_ptr argv = { .ptr.native = __argv };
 	struct user_arg_ptr envp = { .ptr.native = __envp };
 
-	return do_execveat_common(fd, filename, argv, envp, flags);
 }
 
 #ifdef CONFIG_COMPAT
