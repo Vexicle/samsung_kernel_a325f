@@ -1,10 +1,10 @@
 # Reactive kernel
 
 ## Credits:
-Tiann for KernelSU: https://github.com/tiann/KernelSU
-Osm0sis's Anykernel3 installer: https://github.com/osm0sis/AnyKernel3
-Ahnet-69's kernel tree with tweaks and its contributors: https://github.com/ahnet-69/android_kernel_samsung_a32/tree/tweaks/A325FXXS3CWB3
-Source kernel from https://opensource.samsung.com
+- Tiann for KernelSU: https://github.com/tiann/KernelSU
+- Osm0sis's Anykernel3 installer: https://github.com/osm0sis/AnyKernel3
+- Ahnet-69's kernel tree with tweaks and its contributors: https://github.com/ahnet-69/android_kernel_samsung_a32/tree/tweaks/A325FXXS3CWB3
+- Source kernel from https://opensource.samsung.com
 
 ## Features:
 
