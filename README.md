@@ -7,6 +7,7 @@ Ahnet-69's kernel tree with tweaks and its contributors: https://github.com/ahne
 Source kernel from https://opensource.samsung.com
 
 ## Features:
+
 # Extra CPU governors:
 - Userspace
 - Interactive
@@ -22,6 +23,6 @@ Source kernel from https://opensource.samsung.com
 - Scalable
 
 #Extra features:
-- MTK IO boost
+- MTK IO boost (Soon)
 - Bundled with KernelSU
 - Built with optimising flags (-03)
