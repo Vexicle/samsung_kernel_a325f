@@ -22,7 +22,10 @@
 - DCTCP
 - Scalable
 
-#Extra features:
+# Extra features:
 - MTK IO boost (Soon)
 - Bundled with KernelSU
 - Built with optimising flags (-03)
+
+# Planned features:
+- Patches for kali linux (wireless injection etc)
