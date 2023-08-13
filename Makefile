@@ -396,7 +396,7 @@ AFLAGS_MODULE   =
 LDFLAGS_MODULE  =
 CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
-LDFLAGS_vmlinux = -03
+LDFLAGS_vmlinux = 
 
 # Use USERINCLUDE when you must reference the UAPI directories only.
 USERINCLUDE    := \
