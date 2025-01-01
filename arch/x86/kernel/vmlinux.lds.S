@@ -36,12 +36,12 @@ OUTPUT_FORMAT(CONFIG_OUTPUT_FORMAT, CONFIG_OUTPUT_FORMAT, CONFIG_OUTPUT_FORMAT)
 #ifdef CONFIG_X86_32
 OUTPUT_ARCH(i386)
 ENTRY(phys_startup_32)
-jiffies = jiffies_64;
 #else
 OUTPUT_ARCH(i386:x86-64)
 ENTRY(phys_startup_64)
-jiffies_64 = jiffies;
 #endif
+
+jiffies = jiffies_64;
 
 #if defined(CONFIG_X86_64)
 /*
@@ -132,15 +132,20 @@ SECTIONS
 		__indirect_thunk_end = .;
 #endif
 
-		/* End of text section */
-		_etext = .;
+#ifdef CONFIG_CFI_CLANG
+		. = ALIGN(PAGE_SIZE);
+		__cfi_jt_start = .;
+		*(.text..L.cfi.jumptable .text..L.cfi.jumptable.*)
+		__cfi_jt_end = .;
+#endif
 	} :text = 0x9090
 
 	NOTES :text :note
 
 	EXCEPTION_TABLE(16) :text = 0x9090
 
-	/* .text should occupy whole number of pages */
+	/* End of text section, which should occupy whole number of pages */
+	_etext = .;
 	. = ALIGN(PAGE_SIZE);
 	X64_ALIGN_RODATA_BEGIN
 	RO_DATA(PAGE_SIZE)
@@ -352,7 +357,8 @@ SECTIONS
 	.bss : AT(ADDR(.bss) - LOAD_OFFSET) {
 		__bss_start = .;
 		*(.bss..page_aligned)
-		*(.bss)
+		. = ALIGN(PAGE_SIZE);
+		*(BSS_MAIN)
 		. = ALIGN(PAGE_SIZE);
 		__bss_stop = .;
 	}
@@ -361,7 +367,7 @@ SECTIONS
 	.brk : AT(ADDR(.brk) - LOAD_OFFSET) {
 		__brk_base = .;
 		. += 64 * 1024;		/* 64k alignment slop space */
-		*(.brk_reservation)	/* areas brk users have reserved */
+		*(.bss..brk)		/* areas brk users have reserved */
 		__brk_limit = .;
 	}
 
@@ -390,7 +396,7 @@ SECTIONS
  * Per-cpu symbols which need to be offset from __per_cpu_load
  * for the boot processor.
  */
-#define INIT_PER_CPU(x) init_per_cpu__##x = x + __per_cpu_load
+#define INIT_PER_CPU(x) init_per_cpu__##x = ABSOLUTE(x) + __per_cpu_load
 INIT_PER_CPU(gdt_page);
 INIT_PER_CPU(irq_stack_union);
 
@@ -414,3 +420,7 @@ INIT_PER_CPU(irq_stack_union);
            "kexec control code size is too big");
 #endif
 
+#ifdef CONFIG_CFI_CLANG
+. = ASSERT((__cfi_jt_end - __cfi_jt_start > 0),
+	   "CFI jump table is empty");
+#endif

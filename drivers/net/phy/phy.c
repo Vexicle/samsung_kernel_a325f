@@ -335,7 +335,10 @@ int phy_ethtool_ksettings_set(struct phy_device *phydev,
 
 	phydev->autoneg = autoneg;
 
-	phydev->speed = speed;
+	if (autoneg == AUTONEG_DISABLE) {
+		phydev->speed = speed;
+		phydev->duplex = duplex;
+	}
 
 	phydev->advertising = advertising;
 
@@ -343,8 +346,6 @@ int phy_ethtool_ksettings_set(struct phy_device *phydev,
 		phydev->advertising |= ADVERTISED_Autoneg;
 	else
 		phydev->advertising &= ~ADVERTISED_Autoneg;
-
-	phydev->duplex = duplex;
 
 	phydev->mdix_ctrl = cmd->base.eth_tp_mdix_ctrl;
 
@@ -511,7 +512,7 @@ static int phy_start_aneg_priv(struct phy_device *phydev, bool sync)
 	 * negotiation may already be done and aneg interrupt may not be
 	 * generated.
 	 */
-	if (phy_interrupt_is_valid(phydev) && (phydev->state == PHY_AN)) {
+	if (phydev->irq != PHY_POLL && phydev->state == PHY_AN) {
 		err = phy_aneg_done(phydev);
 		if (err > 0) {
 			trigger = true;
@@ -1257,9 +1258,11 @@ int phy_ethtool_set_eee(struct phy_device *phydev, struct ethtool_eee *data)
 		/* Restart autonegotiation so the new modes get sent to the
 		 * link partner.
 		 */
-		ret = phy_restart_aneg(phydev);
-		if (ret < 0)
-			return ret;
+		if (phydev->autoneg == AUTONEG_ENABLE) {
+			ret = phy_restart_aneg(phydev);
+			if (ret < 0)
+				return ret;
+		}
 	}
 
 	return 0;

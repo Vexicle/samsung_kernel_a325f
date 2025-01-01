@@ -76,6 +76,13 @@ static void snd_virmidi_init_event(struct snd_virmidi *vmidi,
 /*
  * decode input event and put to read buffer of each opened file
  */
+
+/* callback for snd_seq_dump_var_event(), bridging to snd_rawmidi_receive() */
+static int dump_to_rawmidi(void *ptr, void *buf, int count)
+{
+	return snd_rawmidi_receive(ptr, buf, count);
+}
+
 static int snd_virmidi_dev_receive_event(struct snd_virmidi_dev *rdev,
 					 struct snd_seq_event *ev,
 					 bool atomic)
@@ -94,7 +101,8 @@ static int snd_virmidi_dev_receive_event(struct snd_virmidi_dev *rdev,
 		if (ev->type == SNDRV_SEQ_EVENT_SYSEX) {
 			if ((ev->flags & SNDRV_SEQ_EVENT_LENGTH_MASK) != SNDRV_SEQ_EVENT_LENGTH_VARIABLE)
 				continue;
-			snd_seq_dump_var_event(ev, (snd_seq_dump_func_t)snd_rawmidi_receive, vmidi->substream);
+			snd_seq_dump_var_event(ev, dump_to_rawmidi, vmidi->substream);
+			snd_midi_event_reset_decode(vmidi->parser);
 		} else {
 			len = snd_midi_event_decode(vmidi->parser, msg, sizeof(msg), ev);
 			if (len > 0)
@@ -163,6 +171,7 @@ static void snd_virmidi_output_trigger(struct snd_rawmidi_substream *substream, 
 	int count, res;
 	unsigned char buf[32], *pbuf;
 	unsigned long flags;
+	bool check_resched = !in_atomic();
 
 	if (up) {
 		vmidi->trigger = 1;
@@ -174,12 +183,12 @@ static void snd_virmidi_output_trigger(struct snd_rawmidi_substream *substream, 
 			}
 			return;
 		}
+		spin_lock_irqsave(&substream->runtime->lock, flags);
 		if (vmidi->event.type != SNDRV_SEQ_EVENT_NONE) {
 			if (snd_seq_kernel_client_dispatch(vmidi->client, &vmidi->event, in_atomic(), 0) < 0)
-				return;
+				goto out;
 			vmidi->event.type = SNDRV_SEQ_EVENT_NONE;
 		}
-		spin_lock_irqsave(&substream->runtime->lock, flags);
 		while (1) {
 			count = __snd_rawmidi_transmit_peek(substream, buf, sizeof(buf));
 			if (count <= 0)
@@ -200,6 +209,15 @@ static void snd_virmidi_output_trigger(struct snd_rawmidi_substream *substream, 
 					vmidi->event.type = SNDRV_SEQ_EVENT_NONE;
 				}
 			}
+			if (!check_resched)
+				continue;
+			/* do temporary unlock & cond_resched() for avoiding
+			 * CPU soft lockup, which may happen via a write from
+			 * a huge rawmidi buffer
+			 */
+			spin_unlock_irqrestore(&substream->runtime->lock, flags);
+			cond_resched();
+			spin_lock_irqsave(&substream->runtime->lock, flags);
 		}
 	out:
 		spin_unlock_irqrestore(&substream->runtime->lock, flags);

@@ -20,6 +20,12 @@
 #include <linux/uidgid.h>
 #include <linux/sched.h>
 #include <linux/sched/user.h>
+#ifdef CONFIG_KDP_CRED
+#include <linux/kdp.h>
+#endif
+#ifdef CONFIG_RUSTUH_KDP_CRED
+#include <linux/rustkdp.h>
+#endif
 
 struct cred;
 struct inode;
@@ -85,6 +91,32 @@ extern int groups_search(const struct group_info *, kgid_t);
 extern bool may_setgroups(void);
 extern void groups_sort(struct group_info *);
 
+#ifdef CONFIG_KDP_CRED
+struct ro_rcu_head {
+	/* RCU deletion */
+	union {
+		int non_rcu;		/* Can we skip RCU deletion? */
+		struct rcu_head	rcu;	/* RCU deletion hook */
+	};
+	void *bp_cred;
+	void *reflected_cred;
+};
+
+struct kdp_usecnt {
+	atomic_t kdp_use_cnt;
+	struct ro_rcu_head kdp_rcu_head;
+};
+#define get_rocred_rcu(cred) ((struct ro_rcu_head *)((atomic_t *)cred->use_cnt + 1))
+#define get_usecnt_rcu(use_cnt) ((struct ro_rcu_head *)((atomic_t *)use_cnt + 1))
+/*
+After KDP endbled, argument of override_creds will not become the current->cred.
+But some code trys to put_creds the current->cred, to free the resource of cred
+which was allocated before the override_creds. In those case, we need to find the
+original cred by below function.
+*/
+#define get_reflected_cred(cred) ((struct cred *)get_rocred_rcu(cred)->reflected_cred)
+#endif
+
 /*
  * The security context of a task
  *
@@ -109,7 +141,7 @@ extern void groups_sort(struct group_info *);
  * same context as task->real_cred.
  */
 struct cred {
-	atomic_t	usage;
+	atomic_long_t	usage;
 #ifdef CONFIG_DEBUG_CREDENTIALS
 	atomic_t	subscribers;	/* number of processes subscribed */
 	void		*put_addr;
@@ -145,8 +177,48 @@ struct cred {
 	struct user_struct *user;	/* real user ID subscription */
 	struct user_namespace *user_ns; /* user_ns the caps and keyrings are relative to. */
 	struct group_info *group_info;	/* supplementary groups for euid/fsgid */
-	struct rcu_head	rcu;		/* RCU deletion hook */
+	/* RCU deletion */
+	union {
+		int non_rcu;			/* Can we skip RCU deletion? */
+		struct rcu_head	rcu;		/* RCU deletion hook */
+	};
+#if defined(CONFIG_KDP_CRED) || defined(CONFIG_RUSTUH_KDP_CRED)
+	atomic_t *use_cnt;
+	struct task_struct *bp_task;
+	void *bp_pgd;
+	unsigned long long type;
+#endif
 } __randomize_layout;
+
+#ifdef CONFIG_KDP_CRED
+typedef struct cred_param {
+	struct cred *cred;
+	struct cred *cred_ro;
+	void *use_cnt_ptr;
+	void *sec_ptr;
+	unsigned long type;
+	union {
+		void *task_ptr;
+		u64 use_cnt;
+	};
+} cred_param_t;
+
+enum {
+	RKP_CMD_COPY_CREDS = 0,
+	RKP_CMD_CMMIT_CREDS,
+	RKP_CMD_OVRD_CREDS,
+};
+
+#define rkp_cred_fill_params(crd,crd_ro,uptr,tsec,rkp_cmd_type,rkp_use_cnt)	\
+do {						\
+	cred_param.cred = crd;		\
+	cred_param.cred_ro = crd_ro;		\
+	cred_param.use_cnt_ptr = uptr;		\
+	cred_param.sec_ptr= tsec;		\
+	cred_param.type = rkp_cmd_type;		\
+	cred_param.use_cnt = (u64)rkp_use_cnt;		\
+} while(0)
+#endif
 
 extern void __put_cred(struct cred *);
 extern void exit_creds(struct task_struct *);
@@ -157,6 +229,10 @@ extern struct cred *prepare_creds(void);
 extern struct cred *prepare_exec_creds(void);
 extern int commit_creds(struct cred *);
 extern void abort_creds(struct cred *);
+#ifdef CONFIG_KDP_CRED
+extern unsigned int rkp_get_task_sec_size(void);
+unsigned int rkp_get_offset_bp_cred(void);
+#endif
 extern const struct cred *override_creds(const struct cred *);
 extern void revert_creds(const struct cred *);
 extern struct cred *prepare_kernel_cred(struct task_struct *);
@@ -220,18 +296,24 @@ static inline bool cap_ambient_invariant_ok(const struct cred *cred)
  * Get a reference on the specified set of new credentials.  The caller must
  * release the reference.
  */
+#ifndef CONFIG_RUSTUH_KDP_CRED
+#ifdef CONFIG_KDP_CRED
+struct cred *get_new_cred(struct cred *cred);
+#else
 static inline struct cred *get_new_cred(struct cred *cred)
 {
-	atomic_inc(&cred->usage);
+	atomic_long_inc(&cred->usage);
 	return cred;
 }
+#endif
+#endif
 
 /**
  * get_cred - Get a reference on a set of credentials
  * @cred: The credentials to reference
  *
  * Get a reference on the specified set of credentials.  The caller must
- * release the reference.
+ * release the reference.  If %NULL is passed, it is returned with no action.
  *
  * This is used to deal with a committed set of credentials.  Although the
  * pointer is const, this will temporarily discard the const and increment the
@@ -242,7 +324,20 @@ static inline struct cred *get_new_cred(struct cred *cred)
 static inline const struct cred *get_cred(const struct cred *cred)
 {
 	struct cred *nonconst_cred = (struct cred *) cred;
+	if (!cred)
+		return cred;
 	validate_creds(cred);
+#ifdef CONFIG_KDP_CRED
+	if (rkp_ro_page((unsigned long)nonconst_cred))
+		get_rocred_rcu(nonconst_cred)->non_rcu = 0;
+	else
+#endif
+#ifdef CONFIG_RUSTUH_KDP_CRED
+	if (is_kdp_protect_addr((unsigned long)nonconst_cred))
+		GET_ROCRED_RCU(nonconst_cred)->non_rcu = 0;
+	else
+#endif
+	nonconst_cred->non_rcu = 0;
 	return get_new_cred(nonconst_cred);
 }
 
@@ -251,20 +346,28 @@ static inline const struct cred *get_cred(const struct cred *cred)
  * @cred: The credentials to release
  *
  * Release a reference to a set of credentials, deleting them when the last ref
- * is released.
+ * is released.  If %NULL is passed, nothing is done.
  *
  * This takes a const pointer to a set of credentials because the credentials
  * on task_struct are attached by const pointers to prevent accidental
  * alteration of otherwise immutable credential sets.
  */
+#ifndef CONFIG_RUSTUH_KDP_CRED
+#ifdef CONFIG_KDP_CRED
+void put_cred(const struct cred *_cred);
+#else
 static inline void put_cred(const struct cred *_cred)
 {
 	struct cred *cred = (struct cred *) _cred;
 
-	validate_creds(cred);
-	if (atomic_dec_and_test(&(cred)->usage))
-		__put_cred(cred);
+	if (cred) {
+		validate_creds(cred);
+		if (atomic_long_dec_and_test(&(cred)->usage))
+			__put_cred(cred);
+	}
 }
+#endif
+#endif
 
 /**
  * current_cred - Access the current task's subjective credentials

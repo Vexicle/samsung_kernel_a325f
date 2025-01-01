@@ -2554,7 +2554,6 @@ int mlx4_counter_alloc(struct mlx4_dev *dev, u32 *idx, u8 usage)
 				   MLX4_CMD_TIME_CLASS_A, MLX4_CMD_WRAPPED);
 		if (!err)
 			*idx = get_param_l(&out_param);
-
 		return err;
 	}
 	return __mlx4_counter_alloc(dev, idx);

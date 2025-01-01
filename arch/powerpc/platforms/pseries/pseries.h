@@ -100,4 +100,8 @@ static inline unsigned long cmo_get_page_size(void)
 
 int dlpar_workqueue_init(void);
 
+void pseries_setup_rfi_flush(void);
+
+void pseries_rng_init(void);
+
 #endif /* _PSERIES_PSERIES_H */

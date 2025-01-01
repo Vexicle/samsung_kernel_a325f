@@ -209,12 +209,14 @@ static void partition_struct(tree *fields, unsigned long length, struct partitio
 
 static void performance_shuffle(tree *newtree, unsigned long length, ranctx *prng_state)
 {
-	unsigned long i, x;
+	unsigned long i, x, index;
 	struct partition_group size_group[length];
 	unsigned long num_groups = 0;
 	unsigned long randnum;
 
 	partition_struct(newtree, length, (struct partition_group *)&size_group, &num_groups);
+
+	/* FIXME: this group shuffle is currently a no-op. */
 	for (i = num_groups - 1; i > 0; i--) {
 		struct partition_group tmp;
 		randnum = ranval(prng_state) % (i + 1);
@@ -224,11 +226,14 @@ static void performance_shuffle(tree *newtree, unsigned long length, ranctx *prn
 	}
 
 	for (x = 0; x < num_groups; x++) {
-		for (i = size_group[x].start + size_group[x].length - 1; i > size_group[x].start; i--) {
+		for (index = size_group[x].length - 1; index > 0; index--) {
 			tree tmp;
+
+			i = size_group[x].start + index;
 			if (DECL_BIT_FIELD_TYPE(newtree[i]))
 				continue;
-			randnum = ranval(prng_state) % (i + 1);
+			randnum = ranval(prng_state) % (index + 1);
+			randnum += size_group[x].start;
 			// we could handle this case differently if desired
 			if (DECL_BIT_FIELD_TYPE(newtree[randnum]))
 				continue;
@@ -443,13 +448,13 @@ static int is_pure_ops_struct(const_tree node)
 		if (node == fieldtype)
 			continue;
 
-		if (!is_fptr(fieldtype))
-			return 0;
-
-		if (code != RECORD_TYPE && code != UNION_TYPE)
+		if (code == RECORD_TYPE || code == UNION_TYPE) {
+			if (!is_pure_ops_struct(fieldtype))
+				return 0;
 			continue;
+		}
 
-		if (!is_pure_ops_struct(fieldtype))
+		if (!is_fptr(fieldtype))
 			return 0;
 	}
 
@@ -580,68 +585,35 @@ static void finish_type(void *event_data, void *data)
 	return;
 }
 
-static struct attribute_spec randomize_layout_attr = {
-	.name		= "randomize_layout",
-	// related to args
-	.min_length	= 0,
-	.max_length	= 0,
-	.decl_required	= false,
-	// need type declaration
-	.type_required	= true,
-	.function_type_required = false,
-	.handler		= handle_randomize_layout_attr,
-#if BUILDING_GCC_VERSION >= 4007
-	.affects_type_identity  = true
-#endif
-};
-
-static struct attribute_spec no_randomize_layout_attr = {
-	.name		= "no_randomize_layout",
-	// related to args
-	.min_length	= 0,
-	.max_length	= 0,
-	.decl_required	= false,
-	// need type declaration
-	.type_required	= true,
-	.function_type_required = false,
-	.handler		= handle_randomize_layout_attr,
-#if BUILDING_GCC_VERSION >= 4007
-	.affects_type_identity  = true
-#endif
-};
-
-static struct attribute_spec randomize_considered_attr = {
-	.name		= "randomize_considered",
-	// related to args
-	.min_length	= 0,
-	.max_length	= 0,
-	.decl_required	= false,
-	// need type declaration
-	.type_required	= true,
-	.function_type_required = false,
-	.handler		= handle_randomize_considered_attr,
-#if BUILDING_GCC_VERSION >= 4007
-	.affects_type_identity  = false
-#endif
-};
-
-static struct attribute_spec randomize_performed_attr = {
-	.name		= "randomize_performed",
-	// related to args
-	.min_length	= 0,
-	.max_length	= 0,
-	.decl_required	= false,
-	// need type declaration
-	.type_required	= true,
-	.function_type_required = false,
-	.handler		= handle_randomize_performed_attr,
-#if BUILDING_GCC_VERSION >= 4007
-	.affects_type_identity  = false
-#endif
-};
+static struct attribute_spec randomize_layout_attr = { };
+static struct attribute_spec no_randomize_layout_attr = { };
+static struct attribute_spec randomize_considered_attr = { };
+static struct attribute_spec randomize_performed_attr = { };
 
 static void register_attributes(void *event_data, void *data)
 {
+	randomize_layout_attr.name		= "randomize_layout";
+	randomize_layout_attr.type_required	= true;
+	randomize_layout_attr.handler		= handle_randomize_layout_attr;
+#if BUILDING_GCC_VERSION >= 4007
+	randomize_layout_attr.affects_type_identity = true;
+#endif
+
+	no_randomize_layout_attr.name		= "no_randomize_layout";
+	no_randomize_layout_attr.type_required	= true;
+	no_randomize_layout_attr.handler	= handle_randomize_layout_attr;
+#if BUILDING_GCC_VERSION >= 4007
+	no_randomize_layout_attr.affects_type_identity = true;
+#endif
+
+	randomize_considered_attr.name		= "randomize_considered";
+	randomize_considered_attr.type_required	= true;
+	randomize_considered_attr.handler	= handle_randomize_considered_attr;
+
+	randomize_performed_attr.name		= "randomize_performed";
+	randomize_performed_attr.type_required	= true;
+	randomize_performed_attr.handler	= handle_randomize_performed_attr;
+
 	register_attribute(&randomize_layout_attr);
 	register_attribute(&no_randomize_layout_attr);
 	register_attribute(&randomize_considered_attr);

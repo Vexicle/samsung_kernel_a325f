@@ -977,6 +977,17 @@ struct drm_connector_helper_funcs {
 	 */
 	int (*atomic_check)(struct drm_connector *connector,
 			    struct drm_connector_state *state);
+
+	/**
+	 * @atomic_commit:
+	 *
+	 * This hook is to be used by drivers implementing writeback connectors
+	 * that need a point when to commit the writeback job to the hardware.
+	 *
+	 * This callback is used by the atomic modeset helpers.
+	 */
+	void (*atomic_commit)(struct drm_connector *connector,
+			      struct drm_writeback_job *writeback_job);
 };
 
 /**
@@ -1158,6 +1169,14 @@ struct drm_plane_helper_funcs {
 	 * drivers shouldn't replace the &drm_plane_state but update the
 	 * current one with the new plane configurations in the new
 	 * plane_state.
+	 *
+	 * Drivers should also swap the framebuffers between current plane
+	 * state (&drm_plane.state) and new_state.
+	 * This is required since cleanup for async commits is performed on
+	 * the new state, rather than old state like for traditional commits.
+	 * Since we want to give up the reference on the current (old) fb
+	 * instead of our brand new one, swap them in the driver during the
+	 * async commit.
 	 *
 	 * FIXME:
 	 *  - It only works for single plane updates

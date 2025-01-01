@@ -295,7 +295,7 @@ out:
 }
 
 static void *bpf_obj_do_get(const struct filename *pathname,
-			    enum bpf_type *type)
+			    enum bpf_type *type, int flags)
 {
 	struct inode *inode;
 	struct path path;
@@ -307,7 +307,7 @@ static void *bpf_obj_do_get(const struct filename *pathname,
 		return ERR_PTR(ret);
 
 	inode = d_backing_inode(path.dentry);
-	ret = inode_permission(inode, MAY_WRITE);
+	ret = inode_permission(inode, ACC_MODE(flags));
 	if (ret)
 		goto out;
 
@@ -326,18 +326,23 @@ out:
 	return ERR_PTR(ret);
 }
 
-int bpf_obj_get_user(const char __user *pathname)
+int bpf_obj_get_user(const char __user *pathname, int flags)
 {
 	enum bpf_type type = BPF_TYPE_UNSPEC;
 	struct filename *pname;
 	int ret = -ENOENT;
+	int f_flags;
 	void *raw;
+
+	f_flags = bpf_get_file_flag(flags);
+	if (f_flags < 0)
+		return f_flags;
 
 	pname = getname(pathname);
 	if (IS_ERR(pname))
 		return PTR_ERR(pname);
 
-	raw = bpf_obj_do_get(pname, &type);
+	raw = bpf_obj_do_get(pname, &type, f_flags);
 	if (IS_ERR(raw)) {
 		ret = PTR_ERR(raw);
 		goto out;
@@ -346,7 +351,7 @@ int bpf_obj_get_user(const char __user *pathname)
 	if (type == BPF_TYPE_PROG)
 		ret = bpf_prog_new_fd(raw);
 	else if (type == BPF_TYPE_MAP)
-		ret = bpf_map_new_fd(raw);
+		ret = bpf_map_new_fd(raw, f_flags);
 	else
 		goto out;
 
@@ -363,20 +368,42 @@ out:
 	putname(pname);
 	return ret;
 }
-EXPORT_SYMBOL_GPL(bpf_obj_get_user);
 
-static void bpf_evict_inode(struct inode *inode)
+static struct bpf_prog *__get_prog_inode(struct inode *inode, enum bpf_prog_type type)
 {
-	enum bpf_type type;
+	struct bpf_prog *prog;
+	int ret = inode_permission(inode, MAY_READ);
+	if (ret)
+		return ERR_PTR(ret);
 
-	truncate_inode_pages_final(&inode->i_data);
-	clear_inode(inode);
+	if (inode->i_op == &bpf_map_iops)
+		return ERR_PTR(-EINVAL);
+	if (inode->i_op != &bpf_prog_iops)
+		return ERR_PTR(-EACCES);
 
-	if (S_ISLNK(inode->i_mode))
-		kfree(inode->i_link);
-	if (!bpf_inode_type(inode, &type))
-		bpf_any_put(inode->i_private, type);
+	prog = inode->i_private;
+
+	ret = security_bpf_prog(prog);
+	if (ret < 0)
+		return ERR_PTR(ret);
+
+	return bpf_prog_inc(prog);
 }
+
+struct bpf_prog *bpf_prog_get_type_path(const char *name, enum bpf_prog_type type)
+{
+	struct bpf_prog *prog;
+	struct path path;
+	int ret = kern_path(name, LOOKUP_FOLLOW, &path);
+	if (ret)
+		return ERR_PTR(ret);
+	prog = __get_prog_inode(d_backing_inode(path.dentry), type);
+	if (!IS_ERR(prog))
+		touch_atime(&path);
+	path_put(&path);
+	return prog;
+}
+EXPORT_SYMBOL(bpf_prog_get_type_path);
 
 /*
  * Display the mount options in /proc/mounts.
@@ -390,11 +417,28 @@ static int bpf_show_options(struct seq_file *m, struct dentry *root)
 	return 0;
 }
 
+static void bpf_destroy_inode_deferred(struct rcu_head *head)
+{
+	struct inode *inode = container_of(head, struct inode, i_rcu);
+	enum bpf_type type;
+
+	if (S_ISLNK(inode->i_mode))
+		kfree(inode->i_link);
+	if (!bpf_inode_type(inode, &type))
+		bpf_any_put(inode->i_private, type);
+	free_inode_nonrcu(inode);
+}
+
+static void bpf_destroy_inode(struct inode *inode)
+{
+	call_rcu(&inode->i_rcu, bpf_destroy_inode_deferred);
+}
+
 static const struct super_operations bpf_super_ops = {
 	.statfs		= simple_statfs,
 	.drop_inode	= generic_delete_inode,
 	.show_options	= bpf_show_options,
-	.evict_inode	= bpf_evict_inode,
+	.destroy_inode	= bpf_destroy_inode,
 };
 
 enum {

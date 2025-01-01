@@ -21,6 +21,7 @@
 #include <linux/rbtree.h>
 #include <linux/file.h>
 #include <linux/uaccess.h>
+#include <uapi/linux/magic.h>
 #include "integrity.h"
 
 static struct rb_root integrity_iint_tree = RB_ROOT;
@@ -43,12 +44,10 @@ static struct integrity_iint_cache *__integrity_iint_find(struct inode *inode)
 		else if (inode > iint->inode)
 			n = n->rb_right;
 		else
-			break;
+			return iint;
 	}
-	if (!n)
-		return NULL;
 
-	return iint;
+	return NULL;
 }
 
 /*
@@ -70,10 +69,17 @@ struct integrity_iint_cache *integrity_iint_find(struct inode *inode)
 
 static void iint_free(struct integrity_iint_cache *iint)
 {
+#ifdef CONFIG_FIVE
+	kfree(iint->five_label);
+	iint->five_label = NULL;
+	iint->five_flags = 0UL;
+	iint->five_status = FIVE_FILE_UNKNOWN;
+#endif
 	kfree(iint->ima_hash);
 	iint->ima_hash = NULL;
 	iint->version = 0;
 	iint->flags = 0UL;
+	iint->atomic_flags = 0UL;
 	iint->ima_file_status = INTEGRITY_UNKNOWN;
 	iint->ima_mmap_status = INTEGRITY_UNKNOWN;
 	iint->ima_bprm_status = INTEGRITY_UNKNOWN;
@@ -111,10 +117,15 @@ struct integrity_iint_cache *integrity_inode_get(struct inode *inode)
 		parent = *p;
 		test_iint = rb_entry(parent, struct integrity_iint_cache,
 				     rb_node);
-		if (inode < test_iint->inode)
+		if (inode < test_iint->inode) {
 			p = &(*p)->rb_left;
-		else
+		} else if (inode > test_iint->inode) {
 			p = &(*p)->rb_right;
+		} else {
+			write_unlock(&integrity_iint_lock);
+			kmem_cache_free(iint_cache, iint);
+			return test_iint;
+		}
 	}
 
 	iint->inode = inode;
@@ -154,13 +165,20 @@ static void init_once(void *foo)
 
 	memset(iint, 0, sizeof(*iint));
 	iint->version = 0;
+#ifdef CONFIG_FIVE
+	iint->five_flags = 0UL;
+	iint->five_status = FIVE_FILE_UNKNOWN;
+	iint->five_signing = false;
+#endif
 	iint->flags = 0UL;
+	iint->atomic_flags = 0;
 	iint->ima_file_status = INTEGRITY_UNKNOWN;
 	iint->ima_mmap_status = INTEGRITY_UNKNOWN;
 	iint->ima_bprm_status = INTEGRITY_UNKNOWN;
 	iint->ima_read_status = INTEGRITY_UNKNOWN;
 	iint->evm_status = INTEGRITY_UNKNOWN;
 	iint->measured_pcrs = 0;
+	mutex_init(&iint->mutex);
 }
 
 static int __init integrity_iintcache_init(void)
@@ -187,12 +205,19 @@ int integrity_kernel_read(struct file *file, loff_t offset,
 	mm_segment_t old_fs;
 	char __user *buf = (char __user *)addr;
 	ssize_t ret;
+#ifdef CONFIG_FIVE
+	struct inode *inode = file_inode(file);
+#endif
 
 	if (!(file->f_mode & FMODE_READ))
 		return -EBADF;
 
 	old_fs = get_fs();
 	set_fs(get_ds());
+#ifdef CONFIG_FIVE
+	if (inode->i_sb->s_magic == OVERLAYFS_SUPER_MAGIC && file->private_data)
+		file = (struct file *)file->private_data;
+#endif
 	ret = __vfs_read(file, buf, count, &offset);
 	set_fs(old_fs);
 

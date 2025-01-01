@@ -533,8 +533,8 @@ static int qxl_primary_apply_cursor(struct drm_plane *plane)
 	cmd->u.set.visible = 1;
 	qxl_release_unmap(qdev, release, &cmd->release_info);
 
-	qxl_push_cursor_ring_release(qdev, release, QXL_CMD_CURSOR, false);
 	qxl_release_fence_buffer_objects(release);
+	qxl_push_cursor_ring_release(qdev, release, QXL_CMD_CURSOR, false);
 
 	return ret;
 
@@ -630,7 +630,7 @@ static void qxl_cursor_atomic_update(struct drm_plane *plane,
 	struct qxl_cursor_cmd *cmd;
 	struct qxl_cursor *cursor;
 	struct drm_gem_object *obj;
-	struct qxl_bo *cursor_bo = NULL, *user_bo = NULL;
+	struct qxl_bo *cursor_bo = NULL, *user_bo = NULL, *old_cursor_bo = NULL;
 	int ret;
 	void *user_ptr;
 	int size = 64*64*4;
@@ -684,7 +684,7 @@ static void qxl_cursor_atomic_update(struct drm_plane *plane,
 							   cursor_bo, 0);
 		cmd->type = QXL_CURSOR_SET;
 
-		qxl_bo_unref(&qcrtc->cursor_bo);
+		old_cursor_bo = qcrtc->cursor_bo;
 		qcrtc->cursor_bo = cursor_bo;
 		cursor_bo = NULL;
 	} else {
@@ -701,8 +701,11 @@ static void qxl_cursor_atomic_update(struct drm_plane *plane,
 	cmd->u.position.y = plane->state->crtc_y + fb->hot_y;
 
 	qxl_release_unmap(qdev, release, &cmd->release_info);
-	qxl_push_cursor_ring_release(qdev, release, QXL_CMD_CURSOR, false);
 	qxl_release_fence_buffer_objects(release);
+	qxl_push_cursor_ring_release(qdev, release, QXL_CMD_CURSOR, false);
+
+	if (old_cursor_bo)
+		qxl_bo_unref(&old_cursor_bo);
 
 	qxl_bo_unref(&cursor_bo);
 
@@ -744,8 +747,8 @@ static void qxl_cursor_atomic_disable(struct drm_plane *plane,
 	cmd->type = QXL_CURSOR_HIDE;
 	qxl_release_unmap(qdev, release, &cmd->release_info);
 
-	qxl_push_cursor_ring_release(qdev, release, QXL_CMD_CURSOR, false);
 	qxl_release_fence_buffer_objects(release);
+	qxl_push_cursor_ring_release(qdev, release, QXL_CMD_CURSOR, false);
 }
 
 static int qxl_plane_prepare_fb(struct drm_plane *plane,

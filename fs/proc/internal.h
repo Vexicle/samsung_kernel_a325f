@@ -159,6 +159,10 @@ extern int pid_delete_dentry(const struct dentry *);
 extern int proc_pid_readdir(struct file *, struct dir_context *);
 extern struct dentry *proc_pid_lookup(struct inode *, struct dentry *, unsigned int);
 extern loff_t mem_lseek(struct file *, loff_t, int);
+extern  unsigned int uclamp_task_effective_util(struct task_struct *p,
+						unsigned int clamp_id);
+extern  unsigned int uclamp_task_util(struct task_struct *p,
+					unsigned int clamp_id);
 
 /* Lookups */
 typedef int instantiate_t(struct inode *, struct dentry *,
@@ -199,11 +203,12 @@ struct pde_opener {
 extern const struct inode_operations proc_link_inode_operations;
 
 extern const struct inode_operations proc_pid_link_inode_operations;
+extern const struct file_operations proc_reclaim_operations;
 
 extern void proc_init_inodecache(void);
 void set_proc_pid_nlink(void);
 extern struct inode *proc_get_inode(struct super_block *, struct proc_dir_entry *);
-extern int proc_fill_super(struct super_block *, void *data, int flags);
+extern int proc_fill_super(struct super_block *);
 extern void proc_entry_rundown(struct proc_dir_entry *);
 
 /*
@@ -249,6 +254,15 @@ static inline void proc_sys_evict_inode(struct  inode *inode,
 #endif
 
 /*
+ * uid.c
+ */
+#ifdef CONFIG_PROC_UID
+extern int proc_uid_init(void);
+#else
+static inline void proc_uid_init(void) { }
+#endif
+
+/*
  * proc_tty.c
  */
 #ifdef CONFIG_TTY
@@ -261,7 +275,6 @@ static inline void proc_tty_init(void) {}
  * root.c
  */
 extern struct proc_dir_entry proc_root;
-extern int proc_parse_options(char *options, struct pid_namespace *pid);
 
 extern void proc_self_init(void);
 extern int proc_remount(struct super_block *, int *, char *);
@@ -274,7 +287,6 @@ struct proc_maps_private {
 	struct inode *inode;
 	struct task_struct *task;
 	struct mm_struct *mm;
-	struct mem_size_stats *rollup;
 #ifdef CONFIG_MMU
 	struct vm_area_struct *tail_vma;
 #endif
@@ -286,12 +298,9 @@ struct proc_maps_private {
 struct mm_struct *proc_mem_open(struct inode *inode, unsigned int mode);
 
 extern const struct file_operations proc_pid_maps_operations;
-extern const struct file_operations proc_tid_maps_operations;
 extern const struct file_operations proc_pid_numa_maps_operations;
-extern const struct file_operations proc_tid_numa_maps_operations;
 extern const struct file_operations proc_pid_smaps_operations;
 extern const struct file_operations proc_pid_smaps_rollup_operations;
-extern const struct file_operations proc_tid_smaps_operations;
 extern const struct file_operations proc_clear_refs_operations;
 extern const struct file_operations proc_pagemap_operations;
 
@@ -300,3 +309,19 @@ extern unsigned long task_statm(struct mm_struct *,
 				unsigned long *, unsigned long *,
 				unsigned long *, unsigned long *);
 extern void task_mem(struct seq_file *, struct mm_struct *);
+
+#ifdef CONFIG_PAGE_BOOST
+#include <linux/pagevec.h>
+
+#define MAX_PAGE_BOOST_FILEPATH_LEN 256
+
+struct proc_filemap_private {
+	struct proc_maps_private maps_private;
+	struct file *target_file;
+	char target_file_name[MAX_PAGE_BOOST_FILEPATH_LEN + 1];
+	bool show_list; /* true : filemap_list, false : filemap_info */
+};
+
+extern const struct file_operations proc_pid_filemap_list_operations;
+extern const struct file_operations proc_pid_io_record_operations;
+#endif

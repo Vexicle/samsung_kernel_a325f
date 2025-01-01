@@ -30,6 +30,7 @@
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/regmap.h>
+#include <linux/sched/task.h>
 #include <linux/util_macros.h>
 
 #include <linux/platform_data/ina2xx.h>
@@ -132,6 +133,11 @@ struct ina2xx_chip_info {
 	int int_time_vbus; /* Bus voltage integration time uS */
 	int int_time_vshunt; /* Shunt voltage integration time uS */
 	bool allow_async_readout;
+	/* data buffer needs space for channel data and timestamp */
+	struct {
+		u16 chan[4];
+		u64 ts __aligned(8);
+	} scan;
 };
 
 static const struct ina2xx_config ina2xx_config[] = {
@@ -597,7 +603,6 @@ static const struct iio_chan_spec ina219_channels[] = {
 static int ina2xx_work_buffer(struct iio_dev *indio_dev)
 {
 	struct ina2xx_chip_info *chip = iio_priv(indio_dev);
-	unsigned short data[8];
 	int bit, ret, i = 0;
 	s64 time_a, time_b;
 	unsigned int alert;
@@ -647,7 +652,7 @@ static int ina2xx_work_buffer(struct iio_dev *indio_dev)
 		if (ret < 0)
 			return ret;
 
-		data[i++] = val;
+		chip->scan.chan[i++] = val;
 
 		if (INA2XX_SHUNT_VOLTAGE + bit == INA2XX_POWER)
 			cnvr_need_clear = 0;
@@ -664,8 +669,7 @@ static int ina2xx_work_buffer(struct iio_dev *indio_dev)
 
 	time_b = iio_get_time_ns(indio_dev);
 
-	iio_push_to_buffers_with_timestamp(indio_dev,
-					   (unsigned int *)data, time_a);
+	iio_push_to_buffers_with_timestamp(indio_dev, &chip->scan, time_a);
 
 	return (unsigned long)(time_b - time_a) / 1000;
 };
@@ -701,6 +705,7 @@ static int ina2xx_buffer_enable(struct iio_dev *indio_dev)
 {
 	struct ina2xx_chip_info *chip = iio_priv(indio_dev);
 	unsigned int sampling_us = SAMPLING_PERIOD(chip);
+	struct task_struct *task;
 
 	dev_dbg(&indio_dev->dev, "Enabling buffer w/ scan_mask %02x, freq = %d, avg =%u\n",
 		(unsigned int)(*indio_dev->active_scan_mask),
@@ -710,11 +715,17 @@ static int ina2xx_buffer_enable(struct iio_dev *indio_dev)
 	dev_dbg(&indio_dev->dev, "Async readout mode: %d\n",
 		chip->allow_async_readout);
 
-	chip->task = kthread_run(ina2xx_capture_thread, (void *)indio_dev,
-				 "%s:%d-%uus", indio_dev->name, indio_dev->id,
-				 sampling_us);
+	task = kthread_create(ina2xx_capture_thread, (void *)indio_dev,
+			      "%s:%d-%uus", indio_dev->name, indio_dev->id,
+			      sampling_us);
+	if (IS_ERR(task))
+		return PTR_ERR(task);
 
-	return PTR_ERR_OR_ZERO(chip->task);
+	get_task_struct(task);
+	wake_up_process(task);
+	chip->task = task;
+
+	return 0;
 }
 
 static int ina2xx_buffer_disable(struct iio_dev *indio_dev)
@@ -723,6 +734,7 @@ static int ina2xx_buffer_disable(struct iio_dev *indio_dev)
 
 	if (chip->task) {
 		kthread_stop(chip->task);
+		put_task_struct(chip->task);
 		chip->task = NULL;
 	}
 

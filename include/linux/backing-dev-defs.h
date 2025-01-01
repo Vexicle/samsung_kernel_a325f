@@ -22,7 +22,6 @@ struct dentry;
  */
 enum wb_state {
 	WB_registered,		/* bdi_register() was done */
-	WB_shutting_down,	/* wb_shutdown() in progress */
 	WB_writeback_running,	/* Writeback is in progress */
 	WB_has_dirty_io,	/* Dirty inodes on ->b_{dirty|io|more_io} */
 };
@@ -154,6 +153,11 @@ struct backing_dev_info {
 	unsigned int min_ratio;
 	unsigned int max_ratio, max_prop_frac;
 
+	/* approximate write throttle statistics - updated at each throttling */
+	unsigned long last_thresh;  /* global/bdi thresh at the last throttle */
+	unsigned long last_nr_dirty; /* global/bdi dirty at the last throttle */
+	unsigned long paused_total; /* approximated sum of pauses. in jiffies */
+
 	/*
 	 * Sum of avg_write_bw of wbs with dirty inodes.  > 0 if there are
 	 * any dirty wbs, which is depended upon by bdi_has_dirty().
@@ -165,6 +169,8 @@ struct backing_dev_info {
 #ifdef CONFIG_CGROUP_WRITEBACK
 	struct radix_tree_root cgwb_tree; /* radix tree of active cgroup wbs */
 	struct rb_root cgwb_congested_tree; /* their congested states */
+	struct mutex cgwb_release_mutex;  /* protect shutdown of wb structs */
+	struct rw_semaphore wb_switch_rwsem; /* no cgwb switch while syncing */
 #else
 	struct bdi_writeback_congested *wb_congested;
 #endif
@@ -180,6 +186,36 @@ struct backing_dev_info {
 	struct dentry *debug_stats;
 #endif
 };
+
+#define BDI_BDP_DEBUG_ENTRY 20
+struct bdi_sec_bdp_entry {
+	unsigned long start_time;
+	unsigned long elapsed_ms;
+	unsigned long global_thresh;
+	unsigned long global_dirty;
+	unsigned long wb_thresh;
+	unsigned long wb_dirty;
+	unsigned long wb_avg_write_bandwidth;
+	unsigned long wb_timelist_inodes;
+};
+
+struct bdi_sec_bdp_dbg {
+	spinlock_t lock;
+	unsigned long total;
+	bool initialized;
+	struct bdi_sec_bdp_entry entry[BDI_BDP_DEBUG_ENTRY];
+	struct bdi_sec_bdp_entry max_entry;
+};
+
+struct sec_backing_dev_info {
+	struct backing_dev_info bdi;
+	struct bdi_sec_bdp_dbg bdp_debug;
+};
+
+static inline struct sec_backing_dev_info *SEC_BDI(struct backing_dev_info *bdi)
+{
+	return container_of(bdi, struct sec_backing_dev_info, bdi);
+}
 
 enum {
 	BLK_RW_ASYNC	= 0,
@@ -198,6 +234,11 @@ static inline void set_bdi_congested(struct backing_dev_info *bdi, int sync)
 {
 	set_wb_congested(bdi->wb.congested, sync);
 }
+
+struct wb_lock_cookie {
+	bool locked;
+	unsigned long flags;
+};
 
 #ifdef CONFIG_CGROUP_WRITEBACK
 
@@ -228,6 +269,14 @@ static inline void wb_get(struct bdi_writeback *wb)
  */
 static inline void wb_put(struct bdi_writeback *wb)
 {
+	if (WARN_ON_ONCE(!wb->bdi)) {
+		/*
+		 * A driver bug might cause a file to be removed before bdi was
+		 * initialized.
+		 */
+		return;
+	}
+
 	if (wb != &wb->bdi->wb)
 		percpu_ref_put(&wb->refcnt);
 }

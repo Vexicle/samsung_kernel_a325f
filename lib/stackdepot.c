@@ -69,6 +69,7 @@ struct stack_record {
 	struct stack_record *next;	/* Link in the hashtable */
 	u32 hash;			/* Hash in the hastable */
 	u32 size;			/* Number of frames in the stack */
+	u32 hit;
 	union handle_parts handle;
 	unsigned long entries[1];	/* Variable-sized array of entries. */
 };
@@ -78,7 +79,9 @@ static void *stack_slabs[STACK_ALLOC_MAX_SLABS];
 static int depot_index;
 static int next_slab_inited;
 static size_t depot_offset;
-static DEFINE_SPINLOCK(depot_lock);
+static DEFINE_RAW_SPINLOCK(depot_lock);
+static struct stack_record *max_found;
+static DEFINE_SPINLOCK(max_found_lock);
 
 static bool init_stack_slab(void **prealloc)
 {
@@ -92,15 +95,19 @@ static bool init_stack_slab(void **prealloc)
 		return true;
 	if (stack_slabs[depot_index] == NULL) {
 		stack_slabs[depot_index] = *prealloc;
+		*prealloc = NULL;
 	} else {
-		stack_slabs[depot_index + 1] = *prealloc;
+		/* If this is the last depot slab, do not touch the next one. */
+		if (depot_index + 1 < STACK_ALLOC_MAX_SLABS) {
+			stack_slabs[depot_index + 1] = *prealloc;
+			*prealloc = NULL;
+		}
 		/*
 		 * This smp_store_release pairs with smp_load_acquire() from
 		 * |next_slab_inited| above and in depot_save_stack().
 		 */
 		smp_store_release(&next_slab_inited, 1);
 	}
-	*prealloc = NULL;
 	return true;
 }
 
@@ -137,6 +144,7 @@ static struct stack_record *depot_alloc_stack(unsigned long *entries, int size,
 
 	stack->hash = hash;
 	stack->size = size;
+	stack->hit = 0;
 	stack->handle.slabindex = depot_index;
 	stack->handle.offset = depot_offset >> STACK_ALLOC_ALIGN;
 	stack->handle.valid = 1;
@@ -194,6 +202,41 @@ void depot_fetch_stack(depot_stack_handle_t handle, struct stack_trace *trace)
 }
 EXPORT_SYMBOL_GPL(depot_fetch_stack);
 
+void depot_hit_stack(depot_stack_handle_t handle, struct stack_trace *trace,
+		int cnt)
+{
+	union handle_parts parts = { .handle = handle };
+	void *slab = stack_slabs[parts.slabindex];
+	size_t offset = parts.offset << STACK_ALLOC_ALIGN;
+	struct stack_record *stack = slab + offset;
+	unsigned long flags;
+
+	stack->hit += cnt;
+	spin_lock_irqsave(&max_found_lock, flags);
+	if ((!max_found) || (stack->hit > max_found->hit))
+		max_found = stack;
+	spin_unlock_irqrestore(&max_found_lock, flags);
+}
+EXPORT_SYMBOL_GPL(depot_hit_stack);
+
+void show_max_hit_page(void)
+{
+	unsigned long entries[16];
+	unsigned long flags;
+	struct stack_trace trace = {
+		.nr_entries = 0,
+		.entries = entries,
+		.max_entries = 16,
+		.skip = 0
+	};
+	spin_lock_irqsave(&max_found_lock, flags);
+	depot_fetch_stack(max_found->handle.handle, &trace);
+	pr_info("max found hit=%d\n", max_found->hit);
+	print_stack_trace(&trace, 2);
+	spin_unlock_irqrestore(&max_found_lock, flags);
+}
+EXPORT_SYMBOL_GPL(show_max_hit_page);
+
 /**
  * depot_save_stack - save stack in a stack depot.
  * @trace - the stacktrace to save.
@@ -239,17 +282,17 @@ depot_stack_handle_t depot_save_stack(struct stack_trace *trace,
 		/*
 		 * Zero out zone modifiers, as we don't have specific zone
 		 * requirements. Keep the flags related to allocation in atomic
-		 * contexts and I/O.
+		 * contexts, I/O, nolockdep.
 		 */
 		alloc_flags &= ~GFP_ZONEMASK;
-		alloc_flags &= (GFP_ATOMIC | GFP_KERNEL);
+		alloc_flags &= (GFP_ATOMIC | GFP_KERNEL | __GFP_NOLOCKDEP);
 		alloc_flags |= __GFP_NOWARN;
 		page = alloc_pages(alloc_flags, STACK_ALLOC_ORDER);
 		if (page)
 			prealloc = page_address(page);
 	}
 
-	spin_lock_irqsave(&depot_lock, flags);
+	raw_spin_lock_irqsave(&depot_lock, flags);
 
 	found = find_stack(*bucket, trace->entries, trace->nr_entries, hash);
 	if (!found) {
@@ -273,7 +316,7 @@ depot_stack_handle_t depot_save_stack(struct stack_trace *trace,
 		WARN_ON(!init_stack_slab(&prealloc));
 	}
 
-	spin_unlock_irqrestore(&depot_lock, flags);
+	raw_spin_unlock_irqrestore(&depot_lock, flags);
 exit:
 	if (prealloc) {
 		/* Nobody used this memory, ok to free it. */

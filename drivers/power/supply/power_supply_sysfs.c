@@ -40,25 +40,70 @@
 
 static struct device_attribute power_supply_attrs[];
 
+#if defined(CONFIG_BATTERY_SAMSUNG)
 static const char * const power_supply_type_text[] = {
 	"Unknown", "Battery", "UPS", "Mains", "USB",
-	"USB_DCP", "USB_CDP", "USB_ACA", "USB_C",
+	"USB_DCP", "USB_CDP", "USB_ACA", "BMS", "MISC",
+	"Wireless", "HV_Wireless", "PMA_Wireless", "CARDOCK", "UARTOFF", "OTG", "LAN_HUB",
+	"MHL_500", "MHL_900", "MHL_1500", "MHL_USB",
+	"SMART_OTG", "SMART_NOTG", "POWER_SHARING",
+	"HV_Mains", "HV_Mains_12V", "HV_Prepare_Mains", "HV_ERR", "MHL_USB_100", "MHL_2000",
+	"HV_Unknown", "MDOCK_TA", "HMT_CONNECTED", "HMT_CHARGE", "Wireless_Pack", "Wireless_Pack_TA",
+	"Wireless_Stand", "HV_Wireless_Stand", "PDIC", "HV_Mains_CHG_LIMIT",
+	"HV_QC20", "HV_QC30", "POGO"
+};
+#else
+static const char * const power_supply_type_text[] = {
+	"Unknown", "Battery", "UPS", "Mains", "USB",
+	"USB_DCP", "USB_CDP", "USB_ACA", "Wireless", "USB_C",
 	"USB_PD", "USB_PD_DRP", "BrickID"
 };
+#endif
 
+#if defined(CONFIG_BATTERY_SAMSUNG)
 static const char * const power_supply_status_text[] = {
 	"Unknown", "Charging", "Discharging", "Not charging", "Full"
 };
+#else
+static const char * const power_supply_status_text[] = {
+	"Unknown", "Charging", "Discharging", "Not charging", "Full",
+	"Cmd discharging"
+};
+#endif
 
+
+#if defined(CONFIG_BATTERY_SAMSUNG)
+static const char * const power_supply_charge_type_text[] = {
+	"Unknown", "N/A", "Trickle", "Fast", "Slow"
+};
+#else
 static const char * const power_supply_charge_type_text[] = {
 	"Unknown", "N/A", "Trickle", "Fast"
 };
+#endif
 
+#if defined(CONFIG_BATTERY_SAMSUNG)
+#if defined(CONFIG_BATTERY_GKI)
 static const char * const power_supply_health_text[] = {
 	"Unknown", "Good", "Overheat", "Dead", "Over voltage",
 	"Unspecified failure", "Cold", "Watchdog timer expire",
-	"Safety timer expire"
+	"Safety timer expire", "Over current", "Cal required", "Warm", "Cool", "Hot"
 };
+#else
+static const char * const power_supply_health_text[] = {
+	"Unknown", "Good", "Overheat", "Warm", "Dead", "Over voltage",
+	"Unspecified failure", "Cold", "Cool",
+	"Watchdog timer expire", "Safety timer expire",
+	"Under voltage", "OverheatLimit"
+};
+#endif
+#else
+static const char * const power_supply_health_text[] = {
+	"Unknown", "Good", "Overheat", "Dead", "Over voltage",
+	"Unspecified failure", "Cold", "Watchdog timer expire",
+	"Safety timer expire", "Over current", "Warm", "Cool", "Hot"
+};
+#endif
 
 static const char * const power_supply_technology_text[] = {
 	"Unknown", "NiMH", "Li-ion", "Li-poly", "LiFe", "NiCd",
@@ -88,10 +133,12 @@ static ssize_t power_supply_show_property(struct device *dev,
 
 		if (ret < 0) {
 			if (ret == -ENODATA)
-				dev_dbg(dev, "driver has no data for `%s' property\n",
+				dev_dbg_ratelimited(dev,
+					"driver has no data for `%s' property\n",
 					attr->attr.name);
 			else if (ret != -ENODEV && ret != -EAGAIN)
-				dev_err(dev, "driver failed to report `%s' property: %zd\n",
+				dev_err_ratelimited(dev,
+					"driver failed to report `%s' property: %zd\n",
 					attr->attr.name, ret);
 			return ret;
 		}
@@ -121,7 +168,10 @@ static ssize_t power_supply_show_property(struct device *dev,
 	else if (off >= POWER_SUPPLY_PROP_MODEL_NAME)
 		return sprintf(buf, "%s\n", value.strval);
 
-	return sprintf(buf, "%d\n", value.intval);
+	if (off == POWER_SUPPLY_PROP_CHARGE_COUNTER_EXT)
+		return sprintf(buf, "%lld\n", value.int64val);
+	else
+		return sprintf(buf, "%d\n", value.intval);
 }
 
 static ssize_t power_supply_store_property(struct device *dev,
@@ -188,6 +238,9 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(present),
 	POWER_SUPPLY_ATTR(online),
 	POWER_SUPPLY_ATTR(authentic),
+#if defined(CONFIG_BATTERY_SAMSUNG)
+	POWER_SUPPLY_ATTR(charging_enabled),
+#endif
 	POWER_SUPPLY_ATTR(technology),
 	POWER_SUPPLY_ATTR(cycle_count),
 	POWER_SUPPLY_ATTR(voltage_max),
@@ -198,9 +251,15 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(voltage_avg),
 	POWER_SUPPLY_ATTR(voltage_ocv),
 	POWER_SUPPLY_ATTR(voltage_boot),
+#if defined(CONFIG_BATTERY_SAMSUNG)
+	POWER_SUPPLY_ATTR(input_voltage_regulation),
+#endif
 	POWER_SUPPLY_ATTR(current_max),
 	POWER_SUPPLY_ATTR(current_now),
 	POWER_SUPPLY_ATTR(current_avg),
+#if defined(CONFIG_BATTERY_SAMSUNG)
+	POWER_SUPPLY_ATTR(current_full),
+#endif
 	POWER_SUPPLY_ATTR(current_boot),
 	POWER_SUPPLY_ATTR(power_now),
 	POWER_SUPPLY_ATTR(power_avg),
@@ -211,6 +270,11 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(charge_now),
 	POWER_SUPPLY_ATTR(charge_avg),
 	POWER_SUPPLY_ATTR(charge_counter),
+#if defined(CONFIG_BATTERY_SAMSUNG)
+	POWER_SUPPLY_ATTR(charge_otg_control),
+	POWER_SUPPLY_ATTR(charge_powered_otg_control),
+	POWER_SUPPLY_ATTR(charge_temp),
+#endif
 	POWER_SUPPLY_ATTR(constant_charge_current),
 	POWER_SUPPLY_ATTR(constant_charge_current_max),
 	POWER_SUPPLY_ATTR(constant_charge_voltage),
@@ -218,6 +282,9 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(charge_control_limit),
 	POWER_SUPPLY_ATTR(charge_control_limit_max),
 	POWER_SUPPLY_ATTR(input_current_limit),
+#if defined(CONFIG_BATTERY_SAMSUNG)
+	POWER_SUPPLY_ATTR(charge_counter_shadow),
+#endif
 	POWER_SUPPLY_ATTR(energy_full_design),
 	POWER_SUPPLY_ATTR(energy_empty_design),
 	POWER_SUPPLY_ATTR(energy_full),
@@ -245,10 +312,43 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(precharge_current),
 	POWER_SUPPLY_ATTR(charge_term_current),
 	POWER_SUPPLY_ATTR(calibrate),
+	/* Local extensions */
+	POWER_SUPPLY_ATTR(usb_hc),
+	POWER_SUPPLY_ATTR(usb_otg),
+	POWER_SUPPLY_ATTR(charge_enabled),
+#if defined(CONFIG_BATTERY_SAMSUNG)
+	POWER_SUPPLY_ATTR(fuelgauge_reset),
+	POWER_SUPPLY_ATTR(usbpd_reset),
+	POWER_SUPPLY_ATTR(factory_mode),
+	POWER_SUPPLY_ATTR(soh),
+	POWER_SUPPLY_ATTR(pd_support),
+#endif
+	/* Local extensions of type int64_t */
+	POWER_SUPPLY_ATTR(charge_counter_ext),
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_ATTR(model_name),
 	POWER_SUPPLY_ATTR(manufacturer),
 	POWER_SUPPLY_ATTR(serial_number),
+#if defined(CONFIG_BATTERY_SAMSUNG)
+	POWER_SUPPLY_ATTR(afc_charger_mode),
+	POWER_SUPPLY_ATTR(vchgin),
+	POWER_SUPPLY_ATTR(vwcin),
+	POWER_SUPPLY_ATTR(vbyp),
+	POWER_SUPPLY_ATTR(vsys),
+	POWER_SUPPLY_ATTR(vbat),
+	POWER_SUPPLY_ATTR(vgpadc),
+	POWER_SUPPLY_ATTR(vcc1),
+	POWER_SUPPLY_ATTR(vcc2),
+	POWER_SUPPLY_ATTR(ichgin),
+	POWER_SUPPLY_ATTR(iwcin),
+	POWER_SUPPLY_ATTR(iotg),
+	POWER_SUPPLY_ATTR(itx),
+	POWER_SUPPLY_ATTR(co_enable),
+	POWER_SUPPLY_ATTR(rr_enable),
+	POWER_SUPPLY_ATTR(pm_factory),
+	POWER_SUPPLY_ATTR(tdie),
+	POWER_SUPPLY_ATTR(fast_iavg),
+#endif
 };
 
 static struct attribute *

@@ -28,7 +28,6 @@
 #include <linux/sched/clock.h>
 
 #include <asm/x86_init.h>
-#include <asm/reboot.h>
 #include <asm/kvmclock.h>
 
 static int kvmclock __ro_after_init = 1;
@@ -46,12 +45,6 @@ early_param("no-kvmclock", parse_no_kvmclock);
 /* The hypervisor will put information about time periodically here */
 static struct pvclock_vsyscall_time_info *hv_clock;
 static struct pvclock_wall_clock wall_clock;
-
-struct pvclock_vsyscall_time_info *pvclock_pvti_cpu0_va(void)
-{
-	return hv_clock;
-}
-EXPORT_SYMBOL_GPL(pvclock_pvti_cpu0_va);
 
 /*
  * The wallclock is the time of day when we booted. Since then, some time may
@@ -143,6 +136,7 @@ static unsigned long kvm_get_tsc_khz(void)
 	src = &hv_clock[cpu].pvti;
 	tsc_khz = pvclock_tsc_khz(src);
 	put_cpu();
+	setup_force_cpu_cap(X86_FEATURE_TSC_KNOWN_FREQ);
 	return tsc_khz;
 }
 
@@ -225,28 +219,9 @@ static void kvm_setup_secondary_clock(void)
 }
 #endif
 
-/*
- * After the clock is registered, the host will keep writing to the
- * registered memory location. If the guest happens to shutdown, this memory
- * won't be valid. In cases like kexec, in which you install a new kernel, this
- * means a random memory location will be kept being written. So before any
- * kind of shutdown from our side, we unregister the clock by writing anything
- * that does not have the 'enable' bit set in the msr
- */
-#ifdef CONFIG_KEXEC_CORE
-static void kvm_crash_shutdown(struct pt_regs *regs)
+void kvmclock_disable(void)
 {
 	native_write_msr(msr_kvm_system_time, 0, 0);
-	kvm_disable_steal_time();
-	native_machine_crash_shutdown(regs);
-}
-#endif
-
-static void kvm_shutdown(void)
-{
-	native_write_msr(msr_kvm_system_time, 0, 0);
-	kvm_disable_steal_time();
-	native_machine_shutdown();
 }
 
 void __init kvmclock_init(void)
@@ -302,10 +277,6 @@ void __init kvmclock_init(void)
 #endif
 	x86_platform.save_sched_clock_state = kvm_save_sched_clock_state;
 	x86_platform.restore_sched_clock_state = kvm_restore_sched_clock_state;
-	machine_ops.shutdown  = kvm_shutdown;
-#ifdef CONFIG_KEXEC_CORE
-	machine_ops.crash_shutdown  = kvm_crash_shutdown;
-#endif
 	kvm_get_preset_lpj();
 	clocksource_register_hz(&kvm_clock, NSEC_PER_SEC);
 	pv_info.name = "KVM";
@@ -334,6 +305,7 @@ int __init kvm_setup_vsyscall_timeinfo(void)
 		return 1;
 	}
 
+	pvclock_set_pvti_cpu0_va(hv_clock);
 	put_cpu();
 
 	kvm_clock.archdata.vclock_mode = VCLOCK_PVCLOCK;

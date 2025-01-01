@@ -53,6 +53,9 @@
 /* big enough to hold our biggest descriptor */
 #define USB_COMP_EP0_BUFSIZ	1024
 
+/* OS feature descriptor length <= 4kB */
+#define USB_COMP_EP0_OS_DESC_BUFSIZ	4096
+
 #define USB_MS_TO_HS_INTERVAL(x)	(ilog2((x * 1000 / 125)) + 1)
 struct usb_configuration;
 
@@ -193,7 +196,11 @@ struct usb_function {
 	struct usb_descriptor_header	**ssp_descriptors;
 
 	struct usb_configuration	*config;
-
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	int (*set_intf_num)(struct usb_function *f,
+			int intf_num, int index_num);
+	int (*set_config_desc)(int conf_num);
+#endif
 	struct usb_os_desc_table	*os_desc_table;
 	unsigned			os_desc_n;
 
@@ -210,6 +217,12 @@ struct usb_function {
 					struct usb_function *);
 	void			(*free_func)(struct usb_function *f);
 	struct module		*mod;
+
+#ifdef CONFIG_USB_CONFIGFS_UEVENT
+	/* Optional function for vendor specific processing */
+	int			(*ctrlrequest)(struct usb_function *,
+					const struct usb_ctrlrequest *);
+#endif
 
 	/* runtime state management */
 	int			(*set_alt)(struct usb_function *,
@@ -244,6 +257,9 @@ int usb_function_deactivate(struct usb_function *);
 int usb_function_activate(struct usb_function *);
 
 int usb_interface_id(struct usb_configuration *, struct usb_function *);
+
+int config_ep_by_speed_and_alt(struct usb_gadget *g, struct usb_function *f,
+				struct usb_ep *_ep, u8 alt);
 
 int config_ep_by_speed(struct usb_gadget *g, struct usb_function *f,
 			struct usb_ep *_ep);
@@ -501,6 +517,14 @@ struct usb_composite_dev {
 	 */
 	int				delayed_status;
 
+#if defined(CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE) && defined(CONFIG_USB_MTU3)
+		/* used by enable_store function of android.c
+		 * to avoid signalling switch changes
+		 */
+	bool				mute_switch;
+	bool				force_disconnect;
+#endif
+
 	/* protects deactivations and delayed_status counts*/
 	spinlock_t			lock;
 
@@ -583,6 +607,7 @@ struct usb_function_instance {
 	struct config_group group;
 	struct list_head cfs_list;
 	struct usb_function_driver *fd;
+	struct usb_function *f;
 	int (*set_inst_name)(struct usb_function_instance *inst,
 			      const char *name);
 	void (*free_func_inst)(struct usb_function_instance *inst);

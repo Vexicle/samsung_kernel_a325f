@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #
 # NOTE! Don't add files that are generated in specific
 # subdirectories here. Add them in the ".gitignore" file
@@ -122,3 +123,7 @@ all.config
 
 # Kdevelop4
 *.kdev4
+=======
+out/
+arch/arm64/boot/Image
+>>>>>>> df69fd642308 (initial commit)

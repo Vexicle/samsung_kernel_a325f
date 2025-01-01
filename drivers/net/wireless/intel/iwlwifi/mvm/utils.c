@@ -810,12 +810,19 @@ int iwl_mvm_disable_txq(struct iwl_mvm *mvm, int queue, int mac80211_queue,
 		.scd_queue = queue,
 		.action = SCD_CFG_DISABLE_QUEUE,
 	};
-	bool remove_mac_queue = true;
+	bool remove_mac_queue = mac80211_queue != IEEE80211_INVAL_HW_QUEUE;
 	int ret;
+
+	if (WARN_ON(remove_mac_queue && mac80211_queue >= IEEE80211_MAX_QUEUES))
+		return -EINVAL;
 
 	if (iwl_mvm_has_new_tx_api(mvm)) {
 		spin_lock_bh(&mvm->queue_info_lock);
-		mvm->hw_queue_to_mac80211[queue] &= ~BIT(mac80211_queue);
+
+		if (remove_mac_queue)
+			mvm->hw_queue_to_mac80211[queue] &=
+				~BIT(mac80211_queue);
+
 		spin_unlock_bh(&mvm->queue_info_lock);
 
 		iwl_trans_txq_free(mvm->trans, queue);
@@ -1021,6 +1028,9 @@ bool iwl_mvm_rx_diversity_allowed(struct iwl_mvm *mvm)
 	bool result = true;
 
 	lockdep_assert_held(&mvm->mutex);
+
+	if (iwlmvm_mod_params.power_scheme != IWL_POWER_SCHEME_CAM)
+		return false;
 
 	if (num_of_ant(iwl_mvm_get_valid_rx_ant(mvm)) == 1)
 		return false;

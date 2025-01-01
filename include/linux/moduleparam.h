@@ -228,19 +228,11 @@ struct kparam_array
 	    VERIFY_OCTAL_PERMISSIONS(perm), level, flags, { arg } }
 
 /* Obsolete - use module_param_cb() */
-#define module_param_call(name, set, get, arg, perm)			\
-	static const struct kernel_param_ops __param_ops_##name =		\
-		{ .flags = 0, (void *)set, (void *)get };		\
+#define module_param_call(name, _set, _get, arg, perm)			\
+	static const struct kernel_param_ops __param_ops_##name =	\
+		{ .flags = 0, .set = _set, .get = _get };		\
 	__module_param_call(MODULE_PARAM_PREFIX,			\
-			    name, &__param_ops_##name, arg,		\
-			    (perm) + sizeof(__check_old_set_param(set))*0, -1, 0)
-
-/* We don't get oldget: it's often a new-style param_get_uint, etc. */
-static inline int
-__check_old_set_param(int (*oldset)(const char *, struct kernel_param *))
-{
-	return 0;
-}
+			    name, &__param_ops_##name, arg, perm, -1, 0)
 
 #ifdef CONFIG_SYSFS
 extern void kernel_param_lock(struct module *mod);
@@ -369,6 +361,8 @@ extern int param_get_int(char *buffer, const struct kernel_param *kp);
 extern const struct kernel_param_ops param_ops_uint;
 extern int param_set_uint(const char *val, const struct kernel_param *kp);
 extern int param_get_uint(char *buffer, const struct kernel_param *kp);
+int param_set_uint_minmax(const char *val, const struct kernel_param *kp,
+		unsigned int min, unsigned int max);
 #define param_check_uint(name, p) __param_check(name, p, unsigned int)
 
 extern const struct kernel_param_ops param_ops_long;

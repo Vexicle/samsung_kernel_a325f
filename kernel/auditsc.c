@@ -471,6 +471,8 @@ static int audit_filter_rules(struct task_struct *tsk,
 			break;
 		case AUDIT_EXE:
 			result = audit_exe_compare(tsk, rule->exe);
+			if (f->op == Audit_not_equal)
+				result = !result;
 			break;
 		case AUDIT_UID:
 			result = audit_uid_comparator(cred->uid, f->op, f->uid);
@@ -1100,7 +1102,7 @@ static void audit_log_execve_info(struct audit_context *context,
 		}
 
 		/* write as much as we can to the audit log */
-		if (len_buf > 0) {
+		if (len_buf >= 0) {
 			/* NOTE: some magic numbers here - basically if we
 			 *       can't fit a reasonable amount of data into the
 			 *       existing audit buffer, flush it and start with
@@ -1272,8 +1274,12 @@ static void show_special(struct audit_context *context, int *call_panic)
 		break;
 	case AUDIT_KERN_MODULE:
 		audit_log_format(ab, "name=");
-		audit_log_untrustedstring(ab, context->module.name);
-		kfree(context->module.name);
+		if (context->module.name) {
+			audit_log_untrustedstring(ab, context->module.name);
+			kfree(context->module.name);
+		} else
+			audit_log_format(ab, "(null)");
+
 		break;
 	}
 	audit_log_end(ab);
@@ -1342,6 +1348,9 @@ static void audit_log_exit(struct audit_context *context, struct task_struct *ts
 	/* tsk == current */
 	context->personality = tsk->personality;
 
+// [ SEC_SELINUX_PORTING_COMMON
+	if (context->major != __NR_setsockopt) {
+// ] SEC_SELINUX_PORTING_COMMON						   
 	ab = audit_log_start(context, GFP_KERNEL, AUDIT_SYSCALL);
 	if (!ab)
 		return;		/* audit_panic has been called */
@@ -1452,7 +1461,9 @@ static void audit_log_exit(struct audit_context *context, struct task_struct *ts
 	}
 
 	audit_log_proctitle(tsk, context);
-
+// [ SEC_SELINUX_PORTING_COMMON
+	} // End of context->major != __NR_setsockopt
+// ] SEC_SELINUX_PORTING_COMMON						   
 	/* Send end of event record to help user space know we are finished */
 	ab = audit_log_start(context, GFP_KERNEL, AUDIT_EOE);
 	if (ab)
@@ -1892,6 +1903,8 @@ void __audit_inode_child(struct inode *parent,
 			break;
 		}
 	}
+
+	cond_resched();
 
 	/* is there a matching child entry? */
 	list_for_each_entry(n, &context->names_list, list) {
@@ -2385,8 +2398,9 @@ void __audit_log_kern_module(char *name)
 {
 	struct audit_context *context = current->audit_context;
 
-	context->module.name = kmalloc(strlen(name) + 1, GFP_KERNEL);
-	strcpy(context->module.name, name);
+	context->module.name = kstrdup(name, GFP_KERNEL);
+	if (!context->module.name)
+		audit_log_lost("out of memory in __audit_log_kern_module");
 	context->type = AUDIT_KERN_MODULE;
 }
 

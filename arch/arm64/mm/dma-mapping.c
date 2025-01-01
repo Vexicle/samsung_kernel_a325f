@@ -26,6 +26,7 @@
 #include <linux/genalloc.h>
 #include <linux/dma-mapping.h>
 #include <linux/dma-contiguous.h>
+#include <linux/iova.h>
 #include <linux/vmalloc.h>
 #include <linux/swiotlb.h>
 #include <linux/pci.h>
@@ -166,7 +167,7 @@ static void *__dma_alloc(struct device *dev, size_t size,
 	/* create a coherent mapping */
 	page = virt_to_page(ptr);
 	coherent_ptr = dma_common_contiguous_remap(page, size, VM_USERMAP,
-						   prot, NULL);
+						   prot, __builtin_return_address(0));
 	if (!coherent_ptr)
 		goto no_map;
 
@@ -629,13 +630,14 @@ static void *__iommu_alloc_attrs(struct device *dev, size_t size,
 						    size >> PAGE_SHIFT);
 			return NULL;
 		}
-		if (!coherent)
-			__dma_flush_area(page_to_virt(page), iosize);
-
 		addr = dma_common_contiguous_remap(page, size, VM_USERMAP,
 						   prot,
 						   __builtin_return_address(0));
-		if (!addr) {
+		if (addr) {
+			if (!coherent)
+				__dma_flush_area(page_to_virt(page), iosize);
+			memset(addr, 0, size);
+		} else {
 			iommu_dma_unmap_page(dev, *handle, iosize, 0, attrs);
 			dma_release_from_contiguous(dev, page,
 						    size >> PAGE_SHIFT);
@@ -709,6 +711,11 @@ static int __iommu_mmap_attrs(struct device *dev, struct vm_area_struct *vma,
 	if (dma_mmap_from_dev_coherent(dev, vma, cpu_addr, size, &ret))
 		return ret;
 
+	if (!is_vmalloc_addr(cpu_addr)) {
+		unsigned long pfn = page_to_pfn(virt_to_page(cpu_addr));
+		return __swiotlb_mmap_pfn(vma, pfn, size);
+	}
+
 	if (attrs & DMA_ATTR_FORCE_CONTIGUOUS) {
 		/*
 		 * DMA_ATTR_FORCE_CONTIGUOUS allocations are always remapped,
@@ -731,6 +738,11 @@ static int __iommu_get_sgtable(struct device *dev, struct sg_table *sgt,
 {
 	unsigned int count = PAGE_ALIGN(size) >> PAGE_SHIFT;
 	struct vm_struct *area = find_vm_area(cpu_addr);
+
+	if (!is_vmalloc_addr(cpu_addr)) {
+		struct page *page = virt_to_page(cpu_addr);
+		return __swiotlb_get_sgtable_page(sgt, page, size);
+	}
 
 	if (attrs & DMA_ATTR_FORCE_CONTIGUOUS) {
 		/*
@@ -911,6 +923,64 @@ void arch_teardown_dma_ops(struct device *dev)
 {
 	dev->dma_ops = NULL;
 }
+
+/*
+ * let user pass the parameters including
+ * 1. iommu device
+ * 2. the desired dma_addr from reserved range
+ *    (the iova start address is managed by user)
+ * 3. the iova buffer size
+ * 4. gfp flag
+ * return the va of caller space
+ */
+void *dma_alloc_coherent_fix_iova(struct device *dev, dma_addr_t dma_addr,
+				  size_t size, gfp_t flag)
+{
+	/* User pass the desired dma start address and size from the
+	 * reserved iova range. Then it maps the va and pa into a
+	 * scaterlist, uses the iova and scatterlist to complete the
+	 * iommu pagetable, finally it returns the va to caller.
+	 */
+	unsigned long attrs = DMA_ATTR_ALLOC_SINGLE_PAGES;
+	bool coherent = is_device_dma_coherent(dev);
+	int ioprot = dma_info_to_prot(DMA_BIDIRECTIONAL, coherent, attrs);
+	pgprot_t prot = __get_dma_pgprot(attrs, PAGE_KERNEL, coherent);
+	struct page **pages;
+	size_t iosize = size;
+	void *addr = NULL;
+
+	pages = iommu_dma_alloc_fix_iova(dev, iosize, flag, attrs, ioprot,
+					 dma_addr, flush_page);
+	if (!pages)
+		return NULL;
+
+	addr = dma_common_pages_remap(pages, size, VM_USERMAP, prot,
+				      __builtin_return_address(0));
+	if (!addr)
+		iommu_dma_free_from_reserved_range(dev, pages, iosize,
+						   &dma_addr);
+	return addr;
+}
+EXPORT_SYMBOL(dma_alloc_coherent_fix_iova);
+
+void dma_free_coherent_fix_iova(struct device *dev, void *cpu_addr,
+				dma_addr_t dma_addr, size_t size)
+{
+	struct vm_struct *area = find_vm_area(cpu_addr);
+	size_t iosize = size;
+
+	size = PAGE_ALIGN(size);
+
+	if (area && area->pages) {
+		iommu_dma_free_from_reserved_range(dev, area->pages,
+			iosize, &dma_addr);
+		dma_common_free_remap(cpu_addr, size, VM_USERMAP);
+	} else {
+		pr_info("find vm area fail!\n");
+		return;
+	}
+}
+EXPORT_SYMBOL(dma_free_coherent_fix_iova);
 
 #else
 

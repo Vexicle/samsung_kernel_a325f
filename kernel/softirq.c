@@ -79,12 +79,16 @@ static void wakeup_softirqd(void)
 
 /*
  * If ksoftirqd is scheduled, we do not want to process pending softirqs
- * right now. Let ksoftirqd handle this at its own rate, to get fairness.
+ * right now. Let ksoftirqd handle this at its own rate, to get fairness,
+ * unless we're doing some of the synchronous softirqs.
  */
-static bool ksoftirqd_running(void)
+#define SOFTIRQ_NOW_MASK ((1 << HI_SOFTIRQ) | (1 << TASKLET_SOFTIRQ))
+static bool ksoftirqd_running(unsigned long pending)
 {
 	struct task_struct *tsk = __this_cpu_read(ksoftirqd);
 
+	if (pending & SOFTIRQ_NOW_MASK)
+		return false;
 	return tsk && (tsk->state == TASK_RUNNING);
 }
 
@@ -271,7 +275,8 @@ restart:
 
 	while ((softirq_bit = ffs(pending))) {
 		unsigned int vec_nr;
-		int prev_count;
+		int prev_count, count;
+		unsigned long long ts;
 
 		h += softirq_bit - 1;
 
@@ -280,9 +285,14 @@ restart:
 
 		kstat_incr_softirqs_this_cpu(vec_nr);
 
+		check_start_time_preempt(softirq_note, count, ts, vec_nr);
 		trace_softirq_entry(vec_nr);
 		h->action(h);
 		trace_softirq_exit(vec_nr);
+		check_process_time_preempt(softirq_note, count,
+					   "softirq %u %s %ps", ts, vec_nr,
+					   softirq_to_name[vec_nr], h->action);
+
 		if (unlikely(prev_count != preempt_count())) {
 			pr_err("huh, entered softirq %u %s %p with preempt_count %08x, exited with %08x?\n",
 			       vec_nr, softirq_to_name[vec_nr], h->action,
@@ -324,7 +334,7 @@ asmlinkage __visible void do_softirq(void)
 
 	pending = local_softirq_pending();
 
-	if (pending && !ksoftirqd_running())
+	if (pending && !ksoftirqd_running(pending))
 		do_softirq_own_stack();
 
 	local_irq_restore(flags);
@@ -351,7 +361,7 @@ void irq_enter(void)
 
 static inline void invoke_softirq(void)
 {
-	if (ksoftirqd_running())
+	if (ksoftirqd_running(local_softirq_pending()))
 		return;
 
 	if (!force_irqthreads) {
@@ -382,7 +392,7 @@ static inline void tick_irq_exit(void)
 
 	/* Make sure that timer wheel updates are propagated */
 	if ((idle_cpu(cpu) && !need_resched()) || tick_nohz_full_cpu(cpu)) {
-		if (!in_interrupt())
+		if (!in_irq())
 			tick_nohz_irq_exit();
 	}
 #endif
@@ -489,6 +499,7 @@ EXPORT_SYMBOL(__tasklet_hi_schedule);
 static __latent_entropy void tasklet_action(struct softirq_action *a)
 {
 	struct tasklet_struct *list;
+	unsigned long long ts;
 
 	local_irq_disable();
 	list = __this_cpu_read(tasklet_vec.head);
@@ -506,7 +517,9 @@ static __latent_entropy void tasklet_action(struct softirq_action *a)
 				if (!test_and_clear_bit(TASKLET_STATE_SCHED,
 							&t->state))
 					BUG();
+				check_start_time(ts);
 				t->func(t->data);
+				check_process_time("tasklet %ps", ts, t->func);
 				tasklet_unlock(t);
 				continue;
 			}
