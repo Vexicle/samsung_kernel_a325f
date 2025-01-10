@@ -11,9 +11,16 @@
 # GNU General Public License for more details.
 #
 
+#
+# sorry had to do full path
+#
+
 MTK_GPU_VERSION = $(subst ",,$(CONFIG_MTK_GPU_VERSION))
 
+
 ifneq ($(word 3,$(MTK_GPU_VERSION)),)
+    # edit line below if u wanna compile
+    #include ~/android_kernel_samsung_a32/drivers/misc/mediatek/gpu/gpu_mali/mali_bifrost/mali-r51p0/drivers/gpu/arm/
     obj-y += mali-$(word 3,$(MTK_GPU_VERSION))/drivers/gpu/arm/midgard/
 else
     obj-y += mali-EAC/drivers/

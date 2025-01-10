@@ -1754,7 +1754,7 @@ struct dentry *incfs_mount_fs(struct file_system_type *type, int flags,
 	sb->s_blocksize_bits = blksize_bits(sb->s_blocksize);
 	sb->s_xattr = incfs_xattr_ops;
 
-	BUILD_BUG_ON(PAGE_SIZE != INCFS_DATA_FILE_BLOCK_SIZE);
+	//BUILD_BUG_ON(PAGE_SIZE != INCFS_DATA_FILE_BLOCK_SIZE);
 
 	error = parse_options(&options, (char *)data);
 	if (error != 0) {

@@ -190,4 +190,3 @@ int vcu_buffer_cache_sync(struct device *dev, struct mtk_vcu_queue *vcu_queue,
 	dma_addr_t dma_addr, size_t size, int op);
 
 #endif
-

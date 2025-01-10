@@ -112,37 +112,37 @@ static inline void unset_scheduler_tuning(struct task_struct *task)
  */
 static int set_turbo_task(int pid, int val)
 {
-	struct task_struct *p;
-	int retval = 0;
+    struct task_struct *p;
+    int retval = 0;
 
 	if (pid < 0 || pid > PID_MAX_DEFAULT)
 		return -EINVAL;
 
 	if (val < 0 || val > 1)
-		return -EINVAL;
+        return -EINVAL;
 
-	rcu_read_lock();
-	p = find_task_by_vpid(pid);
+    rcu_read_lock();
+    p = find_task_by_vpid(pid);
 
-	if (p != NULL) {
-		get_task_struct(p);
-		p->turbo = val;
+    if (p != NULL) {
+        get_task_struct(p);
+        p->turbo = val;
 		if (p->turbo == TURBO_ENABLE)
-			set_scheduler_tuning(p);
+            set_scheduler_tuning(p);
 		else
-			unset_scheduler_tuning(p);
-		trace_turbo_set(p);
-		put_task_struct(p);
+            unset_scheduler_tuning(p);
+        trace_turbo_set(p);
+        put_task_struct(p);
 	} else
-		retval = -ESRCH;
-	rcu_read_unlock();
+        retval = -ESRCH;
+    rcu_read_unlock();
 
-	return retval;
+    return retval;
 }
 
 static inline int unset_turbo_task(int pid)
 {
-	return set_turbo_task(pid, TURBO_DISABLE);
+    return set_turbo_task(pid, TURBO_DISABLE);
 }
 
 static int set_task_turbo_feats(const char *buf,
@@ -154,7 +154,7 @@ static int set_task_turbo_feats(const char *buf,
 	ret = kstrtouint(buf, 0, &val);
 
 
-	mutex_lock(&TURBO_MUTEX_LOCK);
+    mutex_lock(&TURBO_MUTEX_LOCK);
 	if (val == latency_turbo ||
 	    val == launch_turbo  || val == 0)
 		ret = param_set_uint(buf, kp);
@@ -165,13 +165,13 @@ static int set_task_turbo_feats(const char *buf,
 	/* mutex_lock(&TURBO_MUTEX_LOCK); */
 	if (val == 0) {
 		for (i = 0; i < TURBO_PID_COUNT; i++) {
-			if (turbo_pid[i]) {
-				unset_turbo_task(turbo_pid[i]);
-				turbo_pid[i] = 0;
-			}
-		}
-	}
-	mutex_unlock(&TURBO_MUTEX_LOCK);
+            if (turbo_pid[i]) {
+                unset_turbo_task(turbo_pid[i]);
+                turbo_pid[i] = 0;
+            }
+        }
+    } 
+    mutex_unlock(&TURBO_MUTEX_LOCK);
 
 	if (!ret)
 		pr_info("task_turbo_feats is change to %d successfully",

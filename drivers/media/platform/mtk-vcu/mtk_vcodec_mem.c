@@ -465,4 +465,3 @@ int vcu_buffer_cache_sync(struct device *dev, struct mtk_vcu_queue *vcu_queue,
 
 	return -1;
 }
-

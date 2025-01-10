@@ -2799,12 +2799,12 @@ int kbase_context_mmap(struct kbase_context *const kctx,
 	rcu_read_unlock();
 
 	switch (vma->vm_pgoff) {
-	case PFN_DOWN(BASEP_MEM_INVALID_HANDLE):
-	case PFN_DOWN(BASEP_MEM_WRITE_ALLOC_PAGES_HANDLE):
+	case (0ull << 12):
+    case (4ull << 12):
 		/* Illegal handle for direct map */
 		err = -EINVAL;
 		goto out_unlock;
-	case PFN_DOWN(BASE_MEM_MMU_DUMP_HANDLE):
+	case (1ull  << 12):
 #if defined(CONFIG_MALI_VECTOR_DUMP)
 		/* MMU dump */
 		err = kbase_mmu_dump_mmap(kctx, vma, &reg, &kaddr);

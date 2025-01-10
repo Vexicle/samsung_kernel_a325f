@@ -11,6 +11,5 @@
 # GNU General Public License for more details.
 #
 
-MTK_GPU_VERSION = $(subst ",,$(CONFIG_MTK_GPU_VERSION))
-
-obj-y += mali_$(word 2,$(MTK_GPU_VERSION))/
+obj-y += mali_bifrost/
+$(warning gpu mali makefile is being accessed)

@@ -13,6 +13,8 @@
 #include <linux/sched/clock.h>
 #include <linux/err.h>
 
+#include <linux/err.h> //just in case
+
 #if IS_ENABLED(CONFIG_MTK_CMDQ_MBOX_EXT)
 #include "cmdq-util.h"
 
