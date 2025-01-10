@@ -21,7 +21,7 @@ ifeq ($(CONFIG_MTK_GPU_R5P0),y)
 else ifeq ($(CONFIG_MACH_MT6781),y)
     obj-y += gpu_mali/mali_valhall/mali-r32p1/drivers/gpu/arm/midgard/
 else ifneq ($(word 1,$(MTK_GPU_VERSION)),)
-    obj-y += gpu_$(word 1,$(MTK_GPU_VERSION))/
+    obj-y += gpu_mali/
 else
     obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
 endif
@@ -37,3 +37,5 @@ obj-$(CONFIG_MACH_MT6853) += gpu_bm/
 obj-$(CONFIG_MACH_MT6833) += gpu_bm/
 obj-$(CONFIG_MACH_MT6877) += gpu_bm/
 obj-$(CONFIG_MACH_MT6781) += gpu_bm/
+
+$(warning mtk driver file is being accessed)

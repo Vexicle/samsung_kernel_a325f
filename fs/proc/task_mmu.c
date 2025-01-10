@@ -1809,67 +1809,67 @@ static int deactivate_pte_range(pmd_t *pmd, unsigned long addr,
 }
 
 static int reclaim_pte_range(pmd_t *pmd, unsigned long addr,
-				unsigned long end, struct mm_walk *walk)
+                unsigned long end, struct mm_walk *walk)
 {
-	struct vm_area_struct *vma = walk->private;
-	pte_t *pte, ptent;
-	spinlock_t *ptl;
-	struct page *page;
-	LIST_HEAD(page_list);
-	int isolated;
+    struct vm_area_struct *vma = walk->private;
+    pte_t *pte, ptent;
+    spinlock_t *ptl;
+    struct page *page;
+    LIST_HEAD(page_list);
+    int isolated;
 
 #ifdef CONFIG_ZRAM_LRU_WRITEBACK
-	bool is_lru_wb = false;
+    bool is_lru_wb = false;
 
-	if (!strcmp("PerProcessNands", current->comm))
-		is_lru_wb = true;
+    if (!strcmp("PerProcessNands", current->comm))
+        is_lru_wb = true;
 #endif
 
-	split_huge_pmd(vma, addr, pmd);
-	if (pmd_trans_unstable(pmd))
-		return 0;
+    split_huge_pmd(vma, pmd, addr); // Corrected argument order
+    if (pmd_trans_unstable(pmd))
+        return 0;
 cont:
-	if (rwsem_is_contended(&walk->mm->mmap_sem))
-		return -1;
-	if (is_pm_freezing())
-		return -1;
+    if (rwsem_is_contended(&walk->mm->mmap_sem))
+        return -1;
+    if (is_pm_freezing())
+        return -1;
 
-	isolated = 0;
-	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
-	for (; addr != end; pte++, addr += PAGE_SIZE) {
-		ptent = *pte;
-		if (!pte_present(ptent))
-			continue;
+    isolated = 0;
+    pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
+    for (; addr != end; pte++, addr += PAGE_SIZE) {
+        ptent = *pte;
+        if (!pte_present(ptent))
+            continue;
 
-		page = vm_normal_page(vma, addr, ptent);
-		if (!page)
-			continue;
+        page = vm_normal_page(vma, addr, ptent);
+        if (!page)
+            continue;
 
-		if (PageUnevictable(page))
-			continue;
+        if (PageUnevictable(page))
+            continue;
 #ifdef CONFIG_ZRAM_LRU_WRITEBACK
-		if (is_lru_wb && ptep_test_and_clear_young(vma, addr, pte))
-			continue;
+        if (is_lru_wb && ptep_test_and_clear_young(vma, addr, pte))
+            continue;
 #endif
 
-		if (!PageLRU(page))
-			continue;
+        if (!PageLRU(page))
+            continue;
 
-		if (isolate_lru_page(page))
-			continue;
+        if (isolate_lru_page(page))
+            continue;
 
-		list_add(&page->lru, &page_list);
-		isolated++;
-		if (isolated >= SWAP_CLUSTER_MAX)
-			break;
-	}
-	pte_unmap_unlock(pte - 1, ptl);
-	reclaim_pages_from_list(&page_list, vma);
-	if (addr != end)
-		goto cont;
+        list_add(&page->lru, &page_list);
+        isolated++;
+        if (isolated >= SWAP_CLUSTER_MAX)
+            break;
+    }
+    pte_unmap_unlock(pte - 1, ptl);
+    reclaim_pages_from_list(&page_list, vma);
+    if (addr != end)
+        goto cont;
 
-	cond_resched();
-	return 0;
+    cond_resched();
+    return 0;
 }
 
 #ifdef CONFIG_ZRAM_LRU_WRITEBACK

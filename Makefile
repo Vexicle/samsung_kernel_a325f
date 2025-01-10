@@ -318,7 +318,7 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/x86/ -e s/x86_64/x86/ \
 # Default value for CROSS_COMPILE is not to prefix executables
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
 ARCH            ?= arm64
-CROSS_COMPILE   ?= $(srctree)/../aarch64-linux-android-4.9/bin/aarch64-linux-androidkernel-
+CROSS_COMPILE   ?= $(srctree)/../android-ndk-r27c/toolchains/llvm/prebuilt/linux-x86_64/bin/
 
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)
@@ -377,16 +377,17 @@ HOSTLDFLAGS  := $(HOST_LFS_LDFLAGS)
 HOST_LOADLIBES := $(HOST_LFS_LIBS)
 
 # Make variables (CC, etc...)
-AS		= $(CROSS_COMPILE)as
-LD		= $(CROSS_COMPILE)ld
-LDGOLD		= $(CROSS_COMPILE)ld.gold
-CC		= $(srctree)/../clang-r383902/bin/clang
-CPP		= $(CC) -E
-AR		= $(CROSS_COMPILE)ar
-NM		= $(CROSS_COMPILE)nm
-STRIP		= $(CROSS_COMPILE)strip
-OBJCOPY		= $(CROSS_COMPILE)objcopy
-OBJDUMP		= $(CROSS_COMPILE)objdump
+AS			= $(CROSS_COMPILE)llvm-as
+LD			= $(CROSS_COMPILE)ld.lld
+LDGOLD		= $(CROSS_COMPILE)ld.lld
+CC 			= $(CROSS_COMPILE)aarch64-linux-android33-clang
+CXX 		= $(CROSS_COMPILE)aarch64-linux-android33-clang++
+CPP			= $(CC) -E
+AR			= $(CROSS_COMPILE)llvm-ar
+NM			= $(CROSS_COMPILE)llvm-nm
+STRIP		= $(CROSS_COMPILE)llvm-strip
+OBJCOPY		= $(CROSS_COMPILE)llvm-objcopy
+OBJDUMP		= $(CROSS_COMPILE)llvm-objdump
 AWK		= awk
 GENKSYMS	= scripts/genksyms/genksyms
 INSTALLKERNEL  := installkernel

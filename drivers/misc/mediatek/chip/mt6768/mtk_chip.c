@@ -45,78 +45,82 @@ static atomic_t g_cid_init = ATOMIC_INIT(CID_UNINIT);
 
 static void init_chip_id(unsigned int line)
 {
-	if (atomic_read(&g_cid_init) == CID_INITIALIZED)
-		return;
+    if (atomic_read(&g_cid_init) == CID_INITIALIZED)
+        return;
 
-	if (atomic_read(&g_cid_init) == CID_INITIALIZING) {
-		pr_notice("%s (%d) state(%d)\n", __func__, line,
-			atomic_read(&g_cid_init));
-		return;
-	}
+    if (atomic_read(&g_cid_init) == CID_INITIALIZING) {
+        pr_notice("%s (%d) state(%d)\n", __func__, line, atomic_read(&g_cid_init));
+        return;
+    }
 
-	atomic_set(&g_cid_init, CID_INITIALIZING);
+    atomic_set(&g_cid_init, CID_INITIALIZING);
+
 #ifdef CONFIG_OF
-	{
+    {
 		struct device_node *node =
 			of_find_compatible_node(NULL, NULL, "mediatek,chipid");
 
 		if (node) {
-			APHW_CODE = of_iomap(node, 0);
+        APHW_CODE = of_iomap(node, 0);
 			WARN(!APHW_CODE, "unable to map APHW_CODE registers\n");
-			APHW_SUBCODE = of_iomap(node, 1);
+        APHW_SUBCODE = of_iomap(node, 1);
 			WARN(!APHW_SUBCODE, "unable to map APHW_SUBCODE registers\n");
-			APHW_VER = of_iomap(node, 2);
+        APHW_VER = of_iomap(node, 2);
 			WARN(!APHW_VER, "unable to map APHW_VER registers\n");
-			APSW_VER = of_iomap(node, 3);
+        APSW_VER = of_iomap(node, 3);
 			WARN(!APSW_VER, "unable to map APSW_VER registers\n");
 			atomic_set(&g_cid_init, CID_INITIALIZED);
 		} else {
-			atomic_set(&g_cid_init, CID_UNINIT);
+            atomic_set(&g_cid_init, CID_UNINIT);
 			pr_warn("node not found\n");
-		}
-	}
+        }
+    }
 #endif
 }
 
 /* return hardware version */
 static unsigned int __chip_hw_code(void)
 {
-	init_chip_id(__LINE__);
-	return (APHW_CODE) ? readl(IOMEM(APHW_CODE)) : (C_UNKNOWN_CHIP_ID);
+    init_chip_id(__LINE__);
+    if (APHW_CODE)
+        return readl(IOMEM(APHW_CODE));
+    return C_UNKNOWN_CHIP_ID;
 }
+
 
 static unsigned int __chip_hw_ver(void)
 {
-	init_chip_id(__LINE__);
-	return (APHW_VER) ? readl(IOMEM(APHW_VER)) : (C_UNKNOWN_CHIP_ID);
+    init_chip_id(__LINE__);
+    if (APHW_VER)
+        return readl(IOMEM(APHW_VER));
+    return C_UNKNOWN_CHIP_ID;
 }
 
 static unsigned int __chip_sw_ver(void)
 {
-	init_chip_id(__LINE__);
-	return (APSW_VER) ? readl(IOMEM(APSW_VER)) : (C_UNKNOWN_CHIP_ID);
+    init_chip_id(__LINE__);
+    if (APSW_VER)
+        return readl(IOMEM(APSW_VER));
+    return C_UNKNOWN_CHIP_ID;
 }
 
 static unsigned int __chip_hw_subcode(void)
 {
-	init_chip_id(__LINE__);
-	return (APHW_SUBCODE) ?
-		readl(IOMEM(APHW_SUBCODE)) : (C_UNKNOWN_CHIP_ID);
+    init_chip_id(__LINE__);
+    if (APHW_SUBCODE)
+        return readl(IOMEM(APHW_SUBCODE));
+    return C_UNKNOWN_CHIP_ID;
 }
 
 static unsigned int __chip_func_code(void)
 {
-	return get_devinfo_with_index(30);
+    return get_devinfo_with_index(30);
 }
 
 static unsigned int __chip_date_code(void)
 {
-	/* DATE_CODE_YY[11:8] */
-	unsigned int val1 = (get_devinfo_with_index(21) & (0xF << 8)) >> 2;
-	/* DATE_CODE_WW[5:0] */
-	unsigned int val2 = get_devinfo_with_index(21) & 0x3F;
-
-	return (val1 | val2);
+    unsigned int val = get_devinfo_with_index(21);
+    return ((val & (0xF << 8)) >> 2) | (val & 0x3F);
 }
 
 static unsigned int __chip_proj_code(void)
@@ -184,7 +188,7 @@ static chip_info_cb g_cbs[CHIP_INFO_MAX] = {
 unsigned int mt_get_chip_info(unsigned int id)
 {
 	if ((id <= CHIP_INFO_NONE) || (id >= CHIP_INFO_MAX))
-		return 0;
+        return 0;
 	else if (g_cbs[id] == NULL)
 		return 0;
 	return g_cbs[id] ();
@@ -193,28 +197,28 @@ EXPORT_SYMBOL(mt_get_chip_info);
 
 static int __init chip_mod_init(void)
 {
-	struct mt_chip_drv *p_drv = get_mt_chip_drv();
+    struct mt_chip_drv *p_drv = get_mt_chip_drv();
 
-	pr_debug("CODE = %04x %04x %04x %04x, %04x %04x %04x %04x, %04X %04X\n",
-		 __chip_hw_code(), __chip_hw_subcode(), __chip_hw_ver(),
-		 __chip_sw_ver(), __chip_func_code(), __chip_proj_code(),
-		 __chip_date_code(), __chip_fab_code(), mt_get_chip_hw_ver(),
-		mt_get_chip_sw_ver());
+    pr_debug("CODE = %04x %04x %04x %04x, %04x %04x %04x %04x, %04X %04X\n",
+             __chip_hw_code(), __chip_hw_subcode(), __chip_hw_ver(),
+             __chip_sw_ver(), __chip_func_code(), __chip_proj_code(),
+             __chip_date_code(), __chip_fab_code(), mt_get_chip_hw_ver(),
+             mt_get_chip_sw_ver());
 
-	p_drv->info_bit_mask |= CHIP_INFO_BIT(CHIP_INFO_HW_CODE) |
-	    CHIP_INFO_BIT(CHIP_INFO_HW_SUBCODE) |
-	    CHIP_INFO_BIT(CHIP_INFO_HW_VER) |
-	    CHIP_INFO_BIT(CHIP_INFO_SW_VER) |
-		CHIP_INFO_BIT(CHIP_INFO_FUNCTION_CODE) |
-	    CHIP_INFO_BIT(CHIP_INFO_DATE_CODE) |
-		CHIP_INFO_BIT(CHIP_INFO_PROJECT_CODE) |
-	    CHIP_INFO_BIT(CHIP_INFO_FAB_CODE);
+    p_drv->info_bit_mask |= CHIP_INFO_BIT(CHIP_INFO_HW_CODE) |
+                            CHIP_INFO_BIT(CHIP_INFO_HW_SUBCODE) |
+                            CHIP_INFO_BIT(CHIP_INFO_HW_VER) |
+                            CHIP_INFO_BIT(CHIP_INFO_SW_VER) |
+                            CHIP_INFO_BIT(CHIP_INFO_FUNCTION_CODE) |
+                            CHIP_INFO_BIT(CHIP_INFO_DATE_CODE) |
+                            CHIP_INFO_BIT(CHIP_INFO_PROJECT_CODE) |
+                            CHIP_INFO_BIT(CHIP_INFO_FAB_CODE);
 
-	p_drv->get_chip_info = mt_get_chip_info;
+    p_drv->get_chip_info = mt_get_chip_info;
 
-	pr_debug("CODE = %08X %p", p_drv->info_bit_mask, p_drv->get_chip_info);
+    pr_debug("CODE = %08X %p", p_drv->info_bit_mask, p_drv->get_chip_info);
 
-	return 0;
+    return 0;
 }
 
 core_initcall(chip_mod_init);
