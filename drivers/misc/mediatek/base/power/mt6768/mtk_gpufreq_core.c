@@ -45,6 +45,12 @@
 #include "mtk_pbm.h"
 #include "mtk_dramc.h"
 #include "mtk_thermal.h"
+#include <linux/mutex.h>
+
+// uncomment if desperately trying to update gpu drivers
+//DEFINE_MUTEX(g_mfg_lock);
+//EXPORT_SYMBOL(g_mfg_lock);
+
 
 #ifdef CONFIG_MTK_QOS_SUPPORT
 #include "mtk_gpu_bw.h"

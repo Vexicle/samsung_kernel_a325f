@@ -126,4 +126,5 @@ all.config
 =======
 out/
 arch/arm64/boot/Image
+*.rej
 >>>>>>> df69fd642308 (initial commit)
